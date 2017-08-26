@@ -229,14 +229,13 @@ mod tests {
     fn split_unite_data() {
         let my_data = &[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
 
-        let data_shares = split_data(my_data, 2).unwrap();
-        let data_length = my_data.len();
+        for b in 2 .. 5 {
+            let data_shares = split_data(my_data, b).unwrap();
+            let data_length = my_data.len();
 
-        let new_data = unite_data(&data_shares, data_length).unwrap();
-        assert_eq!(my_data, &new_data[..]);
-
-
-
+            let new_data = unite_data(&data_shares[0 .. b as usize], data_length).unwrap();
+            assert_eq!(my_data, &new_data[..]);
+        }
 
     }
 
