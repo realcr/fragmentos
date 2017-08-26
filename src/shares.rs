@@ -69,12 +69,12 @@ fn unite_block(shares: &[Share]) -> Option<Vec<u8>> {
         // Iterate over multiplicands (x-x_j) in monomial:
         for j in 0 .. b {
             if j == i {
-                // In this monomial x_j will be missing:
+                // In this monomial (x-x_i) will be missing:
                 continue
             }
 
             // Perform multiplication of (x-x_j) with current numerator.
-            for k in 1 .. j + 1 {
+            for k in (1 .. (j + 1)).rev() {
                 cur_numerator[k] = cur_numerator[k] -
                     Gf256::from_byte(shares[j].input) * cur_numerator[k-1];
             }
@@ -94,7 +94,6 @@ fn unite_block(shares: &[Share]) -> Option<Vec<u8>> {
             c = c / diff;
         }
 
-        println!("cur_numerator = {:?}", cur_numerator);
 
         // Multiply the numerator polynomial by c_i, and add to the final total polynomial result:
         for j in 0 .. b {
@@ -108,7 +107,6 @@ fn unite_block(shares: &[Share]) -> Option<Vec<u8>> {
          .collect::<Vec<u8>>()
     )
 }
-
 
 
 /*
@@ -128,9 +126,8 @@ mod tests {
 
     #[test]
     fn split_and_unite_block() {
-        let orig_block: &[u8] = &[4,3,2,1];
+        let orig_block: &[u8] = &[1,2,3,4,5,6,7];
         let shares = split_block(&orig_block).unwrap();
-        println!("shares = {:?}", shares);
 
         let new_block = unite_block(&shares[0 .. orig_block.len()]).unwrap();
 
