@@ -43,10 +43,10 @@ fn split_block(block: &[u8]) -> Option<Vec<Share>> {
 fn unite_block(shares: &[Share]) -> Option<Vec<u8>> {
     let b = shares.len();
 
-    if (b == 0) || (b > 256) {
+    if (b == 0) || ((2*b - 1) > 256) {
         // If b == 0 we have no shares to use.
-        // If b > 256 there must be some shares that correspond to the same input, as there are
-        // only 256 elements in the field. We abort.
+        // If 2*b - 1 > 256 there must be some shares that correspond to the same input, as there
+        // are only 256 elements in the field. We abort.
         return None;
     }
 
@@ -108,17 +108,83 @@ fn unite_block(shares: &[Share]) -> Option<Vec<u8>> {
     )
 }
 
+struct DataShare {
+    input: u8, 
+    data: Vec<u8>,
+}
 
-/*
+
 /// Split data to 2b - 1 blocks, where every b can reconstruct the original data.
-fn split_data(data: &[u8], b: usize) -> Vec<Vec<u8>> {
+/// (2*b - 1) must be smaller or equal to 256.
+fn split_data(data: &[u8], b: u8) -> Result<Vec<DataShare>,()> {
+    if 2*b - 1 > 256 {
+        return Err(());
+    }
+    // 2*b - 1 = num_shares
+    let block_size: usize = b as usize;
+    
+    // We divide the data into blocks.
+    // If not exactly divisible by block size, we add extra 0 padding bytes.
+    let num_blocks = (data.len() + (block_size - 1)) / block_size;
 
+    let data_shares = Vec::new();
+    for i in 0 .. (2*b - 1) {
+        data_shares.push(DataShare {
+            input: i,
+            data: Vec::new(),
+        });
+    }
+
+    let process_block = |block| -> Result<(),()> {
+        let shares = match split_block(block) {
+            None => return Err(()),
+            Some(shares) => shares,
+        };
+
+        for share in &shares {
+            assert!(data_shares[share.input as usize].input == share.input);
+            data_shares[share.input as usize].data.push(share.output);
+        }
+        Ok(())
+    };
+
+
+    for i in 0 .. (data.len() / block_size) {
+        process_block(&data[i*block_size .. (i+1)*block_size])?;
+    }
+
+    // Deal with possible left bytes (Because block_size does not 
+    // divide data.len()):
+    
+    let left_bytes = data.len() - block_size * (data.len() / block_size);
+    if left_bytes > 0 {
+        let last_block = Vec::<u8>::new();
+        last_block.extend_from_slice(
+            &data[
+                block_size * (data.len() / block_size) ..
+                data.len()
+            ]
+        );
+        assert_eq!(last_block.len(), left_bytes);
+
+        // Add padding bytes:
+        for _ in 0 .. (block_size - left_bytes) {
+            last_block.push(0);
+        }
+        assert_eq!(last_block.len(), block_size);
+        process_block(&last_block)?;
+    }
+
+    Ok(data_shares)
 }
 
-fn unite_data(shares: Vec<Vec<u8>>, b:usize) -> Vec<u8> {
+/// Reconstruct original data using given b data shares
+fn unite_data(shares: Vec<DataShare>, length: usize) -> Vec<u8> {
+    let block_size = shares.len();
+
+    let res_data = Vec::<u8>::new();
 
 }
-*/
 
 #[cfg(test)]
 mod tests {
@@ -128,13 +194,8 @@ mod tests {
     fn split_and_unite_block() {
         let orig_block: &[u8] = &[1,2,3,4,5,6,7];
         let shares = split_block(&orig_block).unwrap();
-
         let new_block = unite_block(&shares[0 .. orig_block.len()]).unwrap();
-
         assert_eq!(orig_block, &new_block[..]);
     }
 
-    #[test]
-    fn it_works() {
-    }
 }
