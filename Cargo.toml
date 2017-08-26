@@ -1,0 +1,8 @@
+[package]
+name = "fragmentos"
+version = "0.1.0"
+authors = ["real"]
+
+[dependencies]
+
+gf256 = { git = "https://github.com/realcr/rs-gf256" }
