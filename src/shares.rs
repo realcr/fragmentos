@@ -119,6 +119,10 @@ struct DataShare {
 fn split_data(data: &[u8], b: u8) -> Result<Vec<DataShare>,()> {
     let block_size: usize = b as usize;
 
+    if block_size == 0 {
+        return Err(());
+    }
+
     if 2*block_size - 1 > 256 {
         return Err(());
     }
@@ -229,7 +233,7 @@ mod tests {
     fn split_unite_data() {
         let my_data = &[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
 
-        for b in 2 .. 5 {
+        for b in 1 .. 5 {
             let data_shares = split_data(my_data, b).unwrap();
             let data_length = my_data.len();
 
