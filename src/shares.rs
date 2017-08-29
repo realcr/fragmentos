@@ -239,4 +239,23 @@ mod tests {
 
     }
 
+    /*
+    // This example is used in the fragmentos spec.
+    #[test]
+    fn test_example_split_message() {
+        let my_data = b"\x12\x34\x56\x78\x90\xab\xcd\xef\x55";
+        let b = 4;
+
+        let data_shares = split_data(my_data, b).unwrap();
+        for dshare in &data_shares {
+            print!("dshare.data = ");
+            for x in &dshare.data {
+                print!("{:02x} ", x);
+            }
+            println!();
+        }
+        assert!(false);
+    }
+    */
+
 }
