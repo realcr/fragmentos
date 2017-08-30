@@ -51,6 +51,7 @@ fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_datagram: usize) -> Resu
 
     let padding_count = (b - (len_without_padding % b)) % b;
 
+    // Construct T:
     let mut t = Vec::new();
 
     t.extend_from_slice(nonce);     // nonce8
