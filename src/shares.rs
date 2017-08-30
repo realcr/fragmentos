@@ -108,15 +108,15 @@ fn unite_block(shares: &[Share]) -> Result<Vec<u8>,()> {
     )
 }
 
-struct DataShare {
-    input: u8, 
-    data: Vec<u8>,
+pub struct DataShare {
+    pub input: u8, 
+    pub data: Vec<u8>,
 }
 
 
 /// Split data to 2b - 1 blocks, where every b can reconstruct the original data.
 /// (2*b - 1) must be smaller or equal to 256.
-fn split_data(data: &[u8], b: u8) -> Result<Vec<DataShare>,()> {
+pub fn split_data(data: &[u8], b: u8) -> Result<Vec<DataShare>,()> {
     let block_size: usize = b as usize;
 
     if block_size == 0 {
@@ -179,7 +179,7 @@ fn split_data(data: &[u8], b: u8) -> Result<Vec<DataShare>,()> {
 }
 
 /// Reconstruct original data using given b data shares
-fn unite_data(data_shares: &[DataShare], length: usize) -> Result<Vec<u8>,()> {
+pub fn unite_data(data_shares: &[DataShare], length: usize) -> Result<Vec<u8>,()> {
     let block_size = data_shares.len();
 
     if block_size == 0 {
