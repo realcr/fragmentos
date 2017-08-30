@@ -40,6 +40,7 @@ fn max_message(max_datagram: usize) -> Result<usize,()> {
 
 /// Split a message m into a few Fragmentos messages, to be sent to the destination.
 /// Could fail if message is too large.
+/// Returns a list of Fragmentos messages (As vectors) to be sent to the remote side.
 fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_datagram: usize) -> Result<Vec<Vec<u8>>,()> {
     if m.len() > max_message(max_datagram)? {
         return Err(())
