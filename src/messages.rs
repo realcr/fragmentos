@@ -5,7 +5,7 @@ use self::reed_solomon::Encoder;
 use self::crypto::sha2::Sha256;
 use self::crypto::digest::Digest;
 
-use shares::{split_data, unite_data};
+use shares::{split_data, unite_data, DataShare};
 
 /*
 Fragmentos message:
@@ -67,7 +67,7 @@ fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_datagram: usize) -> Resu
     let mut hasher = Sha256::new();
     let output_len = hasher.output_bytes();
     if output_len < MESSAGE_ID_LEN {
-        // The result of the hash hash to at least as long as message_id.
+        // The hash output be at least as long as message_id.
         return Err(());
     }
     let mut sha256_hash = vec![0; output_len];
@@ -93,4 +93,19 @@ fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_datagram: usize) -> Resu
             fmessage
         }).collect::<Vec<Vec<u8>>>()
     )
+}
+
+/// Reconstruct a message given a list of data shares.
+fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare]) -> Result<Vec<u8>,()> {
+    let b = data_shares.len();
+    if b == 0 {
+        return Err(());
+    }
+
+    let t = unite_data(data_shares, b * data_shares[0].data.len())?;
+
+    assert!(false);
+    // TODO: Continue here.
+
+
 }
