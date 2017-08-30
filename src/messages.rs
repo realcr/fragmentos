@@ -1,4 +1,7 @@
 extern crate crypto;
+extern crate reed_solomon;
+
+use self::reed_solomon::Encoder;
 
 
 use self::crypto::sha2::Sha256;
@@ -15,28 +18,34 @@ Fragmentos message:
 - errorCorrection   [8 bytes]
 */
 
+const MESSAGE_ID_LEN: usize = 8;
+const ECC_LEN: usize = 8;
+
+const NONCE_LEN: usize = 8;
+
 
 /// Calculate max possible message for Fragmentos, given the maximum datagram allowed on the
 /// underlying protocol.
 fn max_message(max_datagram: usize) -> Result<usize,()> {
-    if max_datagram <= 18 {
+    let fields_len = MESSAGE_ID_LEN + 1 + 1 + ECC_LEN;
+    if max_datagram <= fields_len {
         Err(())
     } else {
-        Ok((128 * (max_datagram - 18)) - 9)
+        Ok((128 * (max_datagram - fields_len)) - (NONCE_LEN + 1))
     }
 }
 
 /// Split a message m into a few fragmentos messages, to be sent to the destination.
 /// Could fail if message is too large.
-fn split_message(m: &[u8], nonce: &[u8; 8], max_datagram: usize) -> Result<Vec<Vec<u8>>,()> {
+fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_datagram: usize) -> Result<Vec<Vec<u8>>,()> {
     if m.len() > max_message(max_datagram)? {
         return Err(())
     }
 
     // `T := nonce8 || paddingCount || M || padding`
 
-    let len_without_padding = 8 + 1 + m.len();
-    let space_in_msg = max_datagram - (8 + 1 + 1 + 8);
+    let len_without_padding = MESSAGE_ID_LEN + 1 + m.len();
+    let space_in_msg = max_datagram - (MESSAGE_ID_LEN + 1 + 1 + ECC_LEN);
     let b = (len_without_padding + space_in_msg - 1) / space_in_msg;
 
     let padding_count = (b - (len_without_padding % b)) % b;
@@ -53,13 +62,19 @@ fn split_message(m: &[u8], nonce: &[u8; 8], max_datagram: usize) -> Result<Vec<V
 
     // Calculate sha256 of T:
     let mut hasher = Sha256::new();
-    let mut sha256_hash = [0; 32];
+    let output_len = hasher.output_bytes();
+    if output_len < MESSAGE_ID_LEN {
+        // The result of the hash hash to at least as long as messageId.
+        return Err(());
+    }
+    let mut sha256_hash = vec![0; output_len];
     hasher.input(&t);
     hasher.result(&mut sha256_hash);
-
-    let messageId = &sha256_hash[0..8];
+    let messageId = &sha256_hash[0..MESSAGE_ID_LEN];
 
     let data_shares = split_data(m, b as u8)?;
+
+    let enc =  Encoder::new(ECC_LEN);
 
     data_shares
         .into_iter()
