@@ -6,4 +6,5 @@ authors = ["real"]
 [dependencies]
 
 rust-crypto = "0.2.36"
+reed-solomon = "0.1.6"
 gf256 = { git = "https://github.com/realcr/rs-gf256" }
