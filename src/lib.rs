@@ -1,4 +1,5 @@
 mod shares;
+mod messages;
 
 #[cfg(test)]
 mod tests {
