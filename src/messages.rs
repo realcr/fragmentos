@@ -1,7 +1,7 @@
 extern crate crypto;
 extern crate reed_solomon;
 
-use self::reed_solomon::Encoder;
+use self::reed_solomon::{Encoder, Decoder};
 use self::crypto::sha2::Sha256;
 use self::crypto::digest::Digest;
 
@@ -124,4 +124,21 @@ fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare])
     let m = &t[NONCE_LEN + 1 .. t.len() - padding_count];
 
     Ok(m.to_vec())
+}
+
+/// Read a fragmentos message and possibly correct it using the given error correction code.
+/// If the message is valid, doesn't change the message and returns true.
+/// If correction occurred and succeeded, return true. Otherwise, return false.
+fn correct_frag_message(frag_message: &mut [u8]) -> bool {
+    let dec = Decoder::new(ECC_LEN);
+    if !dec.is_corrupted(&frag_message) {
+        // Message is not corrupted, we have nothing to do.
+        return true;
+    }
+
+    // We are here if the message is corrupted. We try to fix it:
+    match dec.correct(frag_message, None) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
 }
