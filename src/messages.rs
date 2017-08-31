@@ -183,8 +183,26 @@ mod tests {
         }).collect::<Vec<DataShare>>();
 
         let new_message = unite_message(message_id, &data_shares[0..b as usize]).unwrap();
-
         assert_eq!(orig_message, &new_message[..]);
+    }
+
+    #[test]
+    fn test_correct_frag_message() {
+        let orig_message = b"This is some message to be split";
+        let mut frags = split_message(orig_message, 
+                                  b"nonce123", 22).unwrap();
+
+        let orig_frag0 = frags[0].to_vec();
+
+        // Make at most ECC_LEN/2 changes to fragment 0:
+        frags[0][5] = 0x41;
+        frags[0][6] = 0x32;
+        frags[0][7] = 0xfe;
+        frags[0][10] = 0x29;
+
+        assert_eq!(correct_frag_message(&mut frags[0]), true);
+        assert_eq!(frags[0], orig_frag0);
+
     }
 
 }
