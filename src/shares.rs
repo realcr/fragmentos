@@ -179,7 +179,8 @@ pub fn split_data(data: &[u8], b: u8) -> Result<Vec<DataShare>,()> {
 }
 
 /// Reconstruct original data using given b data shares
-pub fn unite_data(data_shares: &[DataShare], length: usize) -> Result<Vec<u8>,()> {
+/// Reconstructed data might contain trailing zero padding bytes.
+pub fn unite_data(data_shares: &[DataShare]) -> Result<Vec<u8>,()> {
     let block_size = data_shares.len();
 
     if block_size == 0 {
@@ -211,7 +212,7 @@ pub fn unite_data(data_shares: &[DataShare], length: usize) -> Result<Vec<u8>,()
         res_data.extend_from_slice(&block);
     }
 
-    res_data.truncate(length);
+    // res_data.truncate(length);
 
     Ok(res_data)
 
@@ -233,11 +234,15 @@ mod tests {
     fn split_unite_data() {
         let my_data = &[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
 
-        for b in 1 .. 5 {
-            let data_shares = split_data(my_data, b).unwrap();
-            let data_length = my_data.len();
+        for b in 1 .. 5_usize {
+            let data_shares = split_data(my_data, b as u8).unwrap();
 
-            let new_data = unite_data(&data_shares[0 .. b as usize], data_length).unwrap();
+            let mut new_data = unite_data(&data_shares[0 .. b]).unwrap();
+            assert_eq!(new_data.len(), 
+                       b * ((my_data.len() + b - 1) / b));
+
+            // Truncate resulting data, as it might contain some trailing padding zeroes.
+            new_data.truncate(my_data.len());
             assert_eq!(my_data, &new_data[..]);
         }
 
