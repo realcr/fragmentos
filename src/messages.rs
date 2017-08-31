@@ -83,8 +83,9 @@ fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_datagram: usize)
     }
 
     let message_id = calc_message_id(&t)?;
-    let data_shares = split_data(m, b as u8)?;
+    let data_shares = split_data(&t, b as u8)?;
     let enc =  Encoder::new(ECC_LEN);
+
 
     Ok(data_shares
         .into_iter()
@@ -141,4 +142,49 @@ fn correct_frag_message(frag_message: &mut [u8]) -> bool {
         Ok(_) => true,      // message corrected successfuly
         Err(_) => false,    // could not correct message
     }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_max_message() {
+        assert!(max_message(0).is_err());
+        assert!(max_message(MESSAGE_ID_LEN + ECC_LEN + 1).is_err());
+        assert!(max_message(512).unwrap() > 512);
+    }
+
+    #[test]
+    fn test_calc_message_id() {
+        calc_message_id(b"Dummy T message").unwrap();
+    }
+
+    #[test]
+    fn test_split_unite_message() {
+        let orig_message = b"This is some message to be split";
+        let frags = split_message(orig_message, 
+                                  b"nonce123", 22).unwrap();
+        assert!(frags.len() > 1);
+
+        let message_id = array_ref![&frags[0],0,MESSAGE_ID_LEN];
+        let b = frags[0][MESSAGE_ID_LEN];
+
+        // Make sure that all the frags have exactly the same size:
+        let frag_len = frags[0].len();
+        for frag in &frags {
+            assert_eq!(frag.len(), frag_len);
+        }
+
+        let data_shares = &(0 .. b).map(|i| DataShare {
+            input: i, 
+            data: (&frags[i as usize][MESSAGE_ID_LEN + 1 + 1 .. frag_len - ECC_LEN]).to_vec()
+        }).collect::<Vec<DataShare>>();
+
+        let new_message = unite_message(message_id, &data_shares[0..b as usize]).unwrap();
+
+        assert_eq!(orig_message, &new_message[..]);
+    }
+
 }
