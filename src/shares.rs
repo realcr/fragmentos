@@ -130,7 +130,7 @@ pub fn split_data(data: &[u8], b: u8) -> Result<Vec<DataShare>,()> {
     
     // We divide the data into blocks.
     // If not exactly divisible by block size, we add extra 0 padding bytes.
-    let num_blocks = (data.len() + (block_size - 1)) / block_size;
+    // let num_blocks = (data.len() + (block_size - 1)) / block_size;
 
     let mut data_shares = Vec::new();
     for i in 0 .. (2*b - 1) {
