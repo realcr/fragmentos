@@ -138,7 +138,7 @@ fn correct_frag_message(frag_message: &mut [u8]) -> bool {
 
     // We are here if the message is corrupted. We try to fix it:
     match dec.correct(frag_message, None) {
-        Ok(_) => true,
-        Err(_) => false,
+        Ok(_) => true,      // message corrected successfuly
+        Err(_) => false,    // could not correct message
     }
 }
