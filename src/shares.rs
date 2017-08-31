@@ -108,6 +108,7 @@ fn unite_block(shares: &[Share]) -> Result<Vec<u8>,()> {
     )
 }
 
+#[derive(Debug)]
 pub struct DataShare {
     pub input: u8, 
     pub data: Vec<u8>,
