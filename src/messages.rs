@@ -210,7 +210,5 @@ mod tests {
 
         assert_eq!(correct_frag_message(&mut frags[0]), true);
         assert_eq!(frags[0], orig_frag0);
-
     }
-
 }
