@@ -213,8 +213,6 @@ pub fn unite_data(data_shares: &[DataShare]) -> Result<Vec<u8>,()> {
         res_data.extend_from_slice(&block);
     }
 
-    // res_data.truncate(length);
-
     Ok(res_data)
 
 }
