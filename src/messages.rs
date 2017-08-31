@@ -139,7 +139,15 @@ fn correct_frag_message(frag_message: &mut [u8]) -> bool {
 
     // We are here if the message is corrupted. We try to fix it:
     match dec.correct(frag_message, None) {
-        Ok(_) => true,      // message corrected successfuly
+        Ok(recovered) => {
+            // message corrected successfuly
+            
+            // TODO: Find a way to avoid this copy:
+            for (i,&x) in (*recovered).into_iter().enumerate() {
+                frag_message[i] = x;
+            }
+            true
+        },      
         Err(_) => false,    // could not correct message
     }
 }
