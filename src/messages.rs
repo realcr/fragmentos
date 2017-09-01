@@ -20,7 +20,7 @@ Fragmentos message:
 */
 
 // Length of messageId (First 8 bytes of sha256 of the underlying T data):
-const MESSAGE_ID_LEN: usize = 8;
+pub const MESSAGE_ID_LEN: usize = 8;
 // Length in bytes of the Reed Solomon error correcting code:
 const ECC_LEN: usize = 8;
 // Length in bytes of nonce in the beginning of the underlying T data:
@@ -104,7 +104,7 @@ fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_datagram: usize)
 }
 
 /// Reconstruct a message given a list of data shares.
-fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare]) 
+pub fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare]) 
         -> Result<Vec<u8>,()> {
 
     let b = data_shares.len();
@@ -130,7 +130,7 @@ fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare])
 /// Read a fragmentos message and possibly correct it using the given error correction code.
 /// If the message is valid, doesn't change the message and returns true.
 /// If correction occurred and succeeded, return true. Otherwise, return false.
-fn correct_frag_message(frag_message: &mut [u8]) -> bool {
+pub fn correct_frag_message(frag_message: &mut [u8]) -> Option<Vec<u8>> {
     let dec = Decoder::new(ECC_LEN);
     if !dec.is_corrupted(&frag_message) {
         // Message is not corrupted, we have nothing to do.
