@@ -12,6 +12,11 @@ struct Share {
 fn split_block(block: &[u8]) -> Result<Vec<Share>,()> {
     let b = block.len();
 
+    // If block is empty, return error.
+    if b == 0 {
+        return Err(());
+    }
+
     // We treat the block as a polynomial P of degree b - 1 with b coefficients.
     // (Element block[0] is the most significant coefficient).
     // We then calculate P(0), P(1), ... P(2b - 1)
