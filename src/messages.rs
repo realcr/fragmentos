@@ -134,21 +134,16 @@ pub fn correct_frag_message(frag_message: &mut [u8]) -> Option<Vec<u8>> {
     let dec = Decoder::new(ECC_LEN);
     if !dec.is_corrupted(&frag_message) {
         // Message is not corrupted, we have nothing to do.
-        return true;
+        return Some(frag_message.to_vec())
     }
 
     // We are here if the message is corrupted. We try to fix it:
     match dec.correct(frag_message, None) {
         Ok(recovered) => {
             // message corrected successfuly
-            
-            // TODO: Find a way to avoid this copy:
-            for (i,&x) in (*recovered).into_iter().enumerate() {
-                frag_message[i] = x;
-            }
-            true
+            Some((*recovered).to_vec())
         },      
-        Err(_) => false,    // could not correct message
+        Err(_) => None,    // could not correct message
     }
 }
 
@@ -208,7 +203,7 @@ mod tests {
         frags[0][7] = 0xfe;
         frags[0][10] = 0x29;
 
-        assert_eq!(correct_frag_message(&mut frags[0]), true);
-        assert_eq!(frags[0], orig_frag0);
+        let corrected = correct_frag_message(&mut frags[0]).unwrap();
+        assert_eq!(corrected, orig_frag0);
     }
 }
