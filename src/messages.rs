@@ -20,11 +20,11 @@ Fragmentos message:
 */
 
 // Length of messageId (First 8 bytes of sha256 of the underlying T data):
-const MESSAGE_ID_LEN: usize = 8;
+pub const MESSAGE_ID_LEN: usize = 8;
 // Length in bytes of the Reed Solomon error correcting code:
-const ECC_LEN: usize = 8;
+pub const ECC_LEN: usize = 8;
 // Length in bytes of nonce in the beginning of the underlying T data:
-const NONCE_LEN: usize = 8;
+pub const NONCE_LEN: usize = 8;
 
 
 /// Calculate max possible message for Fragmentos, given the maximum datagram allowed on the
@@ -39,7 +39,7 @@ fn max_message(max_datagram: usize) -> Result<usize,()> {
 }
 
 /// Calculate a hash of T, to obtain messageId.
-fn calc_message_id(t: &[u8]) -> Result<Vec<u8>,()> {
+pub fn calc_message_id(t: &[u8]) -> Result<Vec<u8>,()> {
     let mut hasher = Sha256::new();
     let output_len = hasher.output_bytes();
     if output_len < MESSAGE_ID_LEN {
@@ -104,7 +104,7 @@ fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_datagram: usize)
 }
 
 /// Reconstruct a message given a list of data shares.
-fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare]) 
+pub fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare]) 
         -> Result<Vec<u8>,()> {
 
     let b = data_shares.len();
@@ -130,25 +130,22 @@ fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare])
 /// Read a fragmentos message and possibly correct it using the given error correction code.
 /// If the message is valid, doesn't change the message and returns true.
 /// If correction occurred and succeeded, return true. Otherwise, return false.
-fn correct_frag_message(frag_message: &mut [u8]) -> bool {
+pub fn correct_frag_message(frag_message: &[u8]) -> Option<Vec<u8>> {
     let dec = Decoder::new(ECC_LEN);
     if !dec.is_corrupted(&frag_message) {
         // Message is not corrupted, we have nothing to do.
-        return true;
+        return Some(frag_message.to_vec())
     }
 
     // We are here if the message is corrupted. We try to fix it:
-    match dec.correct(frag_message, None) {
+    // TODO: Remove the clone here in the next version of reed-solomon.
+    // frag_message doesn't need to be mutable.
+    match dec.correct(&mut frag_message.to_vec(), None) {
         Ok(recovered) => {
             // message corrected successfuly
-            
-            // TODO: Find a way to avoid this copy:
-            for (i,&x) in (*recovered).into_iter().enumerate() {
-                frag_message[i] = x;
-            }
-            true
+            Some((*recovered).to_vec())
         },      
-        Err(_) => false,    // could not correct message
+        Err(_) => None,    // could not correct message
     }
 }
 
@@ -208,7 +205,7 @@ mod tests {
         frags[0][7] = 0xfe;
         frags[0][10] = 0x29;
 
-        assert_eq!(correct_frag_message(&mut frags[0]), true);
-        assert_eq!(frags[0], orig_frag0);
+        let corrected = correct_frag_message(&mut frags[0]).unwrap();
+        assert_eq!(corrected, orig_frag0);
     }
 }
