@@ -8,6 +8,7 @@ use ::messages::{MESSAGE_ID_LEN, ECC_LEN, NONCE_LEN,
     calc_message_id};
 
 struct CurMessage {
+    instant_added: Instant,
     b: u8,
     share_length: usize,
     data_shares: HashMap<u8, Vec<u8>>, // input -> data
@@ -30,7 +31,7 @@ struct FragStateMachine {
 impl FragStateMachine {
     /// Process a newly received Fragmentos message.
     /// Possibly return a reconstructed message.
-    fn received_frag_message(&mut self, frag_message: &[u8], cur_time: Instant) -> Option<Vec<u8>> {
+    fn received_frag_message(&mut self, frag_message: &[u8], cur_instant: Instant) -> Option<Vec<u8>> {
 
         // Use the error correcting code to try to correct the error if possible.
         let corrected = match correct_frag_message(frag_message) {
@@ -42,7 +43,7 @@ impl FragStateMachine {
 
         if self.used_message_ids.contains_key(message_id) {
             // Refresh message_id entry inside used_message_ids:
-            self.used_message_ids.insert(message_id.clone(), cur_time);
+            self.used_message_ids.insert(message_id.clone(), cur_instant);
             return None;
         }
 
@@ -67,6 +68,7 @@ impl FragStateMachine {
             },
             None => {
                 self.cur_messages.insert(message_id.clone(), CurMessage {
+                    instant_added: cur_instant,
                     b,
                     share_length,
                     data_shares: HashMap::new(),
@@ -88,7 +90,7 @@ impl FragStateMachine {
         }
 
         // We got b shares. This should be enough to try and reconstruct the full message.
-        self.used_message_ids.insert(message_id.clone(), cur_time);
+        self.used_message_ids.insert(message_id.clone(), cur_instant);
 
         let cur_m = self.cur_messages.remove(message_id).unwrap();
 
@@ -123,7 +125,7 @@ impl FragStateMachine {
 
     /// Notice about the passing time.
     /// Possibly use this to clean up old entries.
-    fn time_tick(&mut self, cur_time: Instant) {
+    fn time_tick(&mut self, cur_instant: Instant) {
 
     }
 }
