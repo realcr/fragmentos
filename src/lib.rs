@@ -3,6 +3,7 @@ extern crate arrayref;
 
 mod shares;
 mod messages;
+mod state_machine;
 
 #[cfg(test)]
 mod tests {
