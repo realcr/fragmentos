@@ -140,7 +140,7 @@ pub fn correct_frag_message(frag_message: &[u8]) -> Option<Vec<u8>> {
     // We are here if the message is corrupted. We try to fix it:
     // TODO: Remove the clone here in the next version of reed-solomon.
     // frag_message doesn't need to be mutable.
-    match dec.correct(&mut frag_message.clone(), None) {
+    match dec.correct(&mut frag_message.to_vec(), None) {
         Ok(recovered) => {
             // message corrected successfuly
             Some((*recovered).to_vec())
