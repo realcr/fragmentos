@@ -130,7 +130,7 @@ pub fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare
 /// Read a fragmentos message and possibly correct it using the given error correction code.
 /// If the message is valid, doesn't change the message and returns true.
 /// If correction occurred and succeeded, return true. Otherwise, return false.
-pub fn correct_frag_message(frag_message: &mut [u8]) -> Option<Vec<u8>> {
+pub fn correct_frag_message(frag_message: &[u8]) -> Option<Vec<u8>> {
     let dec = Decoder::new(ECC_LEN);
     if !dec.is_corrupted(&frag_message) {
         // Message is not corrupted, we have nothing to do.
@@ -138,7 +138,9 @@ pub fn correct_frag_message(frag_message: &mut [u8]) -> Option<Vec<u8>> {
     }
 
     // We are here if the message is corrupted. We try to fix it:
-    match dec.correct(frag_message, None) {
+    // TODO: Remove the clone here in the next version of reed-solomon.
+    // frag_message doesn't need to be mutable.
+    match dec.correct(&mut frag_message.clone(), None) {
         Ok(recovered) => {
             // message corrected successfuly
             Some((*recovered).to_vec())
