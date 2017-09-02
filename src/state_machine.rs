@@ -1,6 +1,6 @@
 
 use std::time::{Instant};
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap};
 
 use ::shares::{DataShare};
 use ::messages::{MESSAGE_ID_LEN, ECC_LEN, NONCE_LEN,
@@ -54,8 +54,9 @@ impl FragStateMachine {
         let share_index = frag_message[MESSAGE_ID_LEN + 1];
         let share_data = &frag_message[MESSAGE_ID_LEN + 1 + 1 ..  frag_message.len() - ECC_LEN];
 
-        let mut cur_m = match self.cur_messages.get(message_id) {
-            Some(cur_m) => {
+        match self.cur_messages.contains_key(message_id) {
+            true =>  {
+                let cur_m = self.cur_messages.get(message_id).unwrap();
                 // If there is already cur_m with the given message_id, make sure that it
                 // matches the received fragment metadata:
                 if cur_m.b != b {
@@ -64,33 +65,35 @@ impl FragStateMachine {
                 if cur_m.share_length != share_length {
                     return None;
                 }
-                cur_m
             },
-            None => {
+            false => {
                 self.cur_messages.insert(message_id.clone(), CurMessage {
                     instant_added: cur_instant,
                     b,
                     share_length,
                     data_shares: HashMap::new(),
                 });
-                self.cur_messages.get(message_id).unwrap()
             }
         };
 
-        // If we already have this share, we discard the message:
-        if cur_m.data_shares.contains_key(&share_index) {
-            return None;
+        { 
+            let cur_m = self.cur_messages.get_mut(message_id).unwrap();
+
+            // If we already have this share, we discard the message:
+            if cur_m.data_shares.contains_key(&share_index) {
+                return None;
+            }
+
+            // Insert the new share we have received:
+            cur_m.data_shares.insert(share_index, share_data.to_vec());
+
+            if cur_m.data_shares.len() < b as usize {
+                return None;
+            }
+
+            // We got b shares. This should be enough to try and reconstruct the full message.
+            self.used_message_ids.insert(message_id.clone(), cur_instant);
         }
-
-        // Insert the new share we have received:
-        cur_m.data_shares.insert(share_index, share_data.to_vec());
-
-        if cur_m.data_shares.len() < b as usize {
-            return None;
-        }
-
-        // We got b shares. This should be enough to try and reconstruct the full message.
-        self.used_message_ids.insert(message_id.clone(), cur_instant);
 
         let cur_m = self.cur_messages.remove(message_id).unwrap();
 
