@@ -114,8 +114,7 @@ impl FragStateMachine {
             return None;
         }
 
-        // `T := nonce8 || paddingCount || M || padding`
-
+        // Extract the message M from T:
         let padding_count = t[NONCE_LEN] as usize;
         let m = &t[NONCE_LEN + 1 .. t.len() - padding_count];
 
