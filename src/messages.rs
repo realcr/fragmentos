@@ -22,9 +22,9 @@ Fragmentos message:
 // Length of messageId (First 8 bytes of sha256 of the underlying T data):
 pub const MESSAGE_ID_LEN: usize = 8;
 // Length in bytes of the Reed Solomon error correcting code:
-const ECC_LEN: usize = 8;
+pub const ECC_LEN: usize = 8;
 // Length in bytes of nonce in the beginning of the underlying T data:
-const NONCE_LEN: usize = 8;
+pub const NONCE_LEN: usize = 8;
 
 
 /// Calculate max possible message for Fragmentos, given the maximum datagram allowed on the
@@ -39,7 +39,7 @@ fn max_message(max_datagram: usize) -> Result<usize,()> {
 }
 
 /// Calculate a hash of T, to obtain messageId.
-fn calc_message_id(t: &[u8]) -> Result<Vec<u8>,()> {
+pub fn calc_message_id(t: &[u8]) -> Result<Vec<u8>,()> {
     let mut hasher = Sha256::new();
     let output_len = hasher.output_bytes();
     if output_len < MESSAGE_ID_LEN {
