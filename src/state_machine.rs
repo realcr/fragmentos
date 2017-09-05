@@ -1,5 +1,5 @@
 
-use std::time::{Instant};
+use std::time::{Instant, Duration};
 use std::collections::{HashMap};
 
 use ::shares::{DataShare};
@@ -160,5 +160,23 @@ impl FragStateMachine {
         self.used_message_ids.retain(|_, &mut instant| {
             cur_instant.duration_since(instant).as_secs() <= MESSAGE_ID_TIMEOUT
         });
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_time_tick_basic() {
+        let mut fsm = FragStateMachine::new();
+        let inst = Instant::now();
+        let inst2 = inst + Duration::new(5,0);
+        let inst3 = inst2 + Duration::new(5,0);
+
+        fsm.time_tick(inst);
+        fsm.time_tick(inst2);
+        fsm.time_tick(inst3);
     }
 }
