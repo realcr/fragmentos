@@ -32,6 +32,13 @@ struct FragStateMachine {
 
 
 impl FragStateMachine {
+    fn new() -> Self {
+        FragStateMachine {
+            used_message_ids: HashMap::new(),
+            cur_messages: HashMap::new(),
+        }
+    }
+
     /// Process a newly received Fragmentos message.
     /// Possibly return a reconstructed message.
     fn received_frag_message(&mut self, frag_message: &[u8], 
