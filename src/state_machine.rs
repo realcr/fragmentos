@@ -7,6 +7,8 @@ use ::messages::{MESSAGE_ID_LEN, ECC_LEN, NONCE_LEN,
     unite_message, correct_frag_message,
     calc_message_id};
 
+const MESSAGE_ID_TIMEOUT: u64 = 30;
+
 struct CurMessage {
     instant_added: Instant,
     b: u8,
@@ -28,10 +30,12 @@ struct FragStateMachine {
 - errorCorrection   [8 bytes]
 */
 
+
 impl FragStateMachine {
     /// Process a newly received Fragmentos message.
     /// Possibly return a reconstructed message.
-    fn received_frag_message(&mut self, frag_message: &[u8], cur_instant: Instant) -> Option<Vec<u8>> {
+    fn received_frag_message(&mut self, frag_message: &[u8], 
+                             cur_instant: Instant) -> Option<Vec<u8>> {
 
         // Use the error correcting code to try to correct the error if possible.
         let corrected = match correct_frag_message(frag_message) {
@@ -126,9 +130,27 @@ impl FragStateMachine {
         Some(m.to_vec())
     }
 
-    /// Notice about the passing time.
+    /// A notice about the passing time.
     /// Possibly use this to clean up old entries.
     fn time_tick(&mut self, cur_instant: Instant) {
 
+        // Cleanup old entries from cur_messages. 
+        // For any such cleaned up message, move its message_id to used_message_ids.
+        {
+            let used_message_ids = &mut self.used_message_ids;
+            self.cur_messages.retain(|message_id, cur_message| {
+                if cur_message.instant_added.elapsed().as_secs() <= MESSAGE_ID_TIMEOUT {
+                    true
+                } else {
+                    used_message_ids.insert(message_id.clone(), cur_instant);
+                    false
+                }
+            });
+        }
+
+        // Cleanup old entries from used_message_ids:
+        self.used_message_ids.retain(|_message_id, instant| {
+            instant.elapsed().as_secs() <= MESSAGE_ID_TIMEOUT
+        });
     }
 }
