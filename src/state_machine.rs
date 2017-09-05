@@ -146,7 +146,8 @@ impl FragStateMachine {
         {
             let used_message_ids = &mut self.used_message_ids;
             self.cur_messages.retain(|message_id, cur_message| {
-                if cur_message.instant_added.elapsed().as_secs() <= MESSAGE_ID_TIMEOUT {
+                if cur_instant.duration_since(cur_message.instant_added).as_secs() 
+                        <= MESSAGE_ID_TIMEOUT {
                     true
                 } else {
                     used_message_ids.insert(message_id.clone(), cur_instant);
@@ -156,8 +157,8 @@ impl FragStateMachine {
         }
 
         // Cleanup old entries from used_message_ids:
-        self.used_message_ids.retain(|_message_id, instant| {
-            instant.elapsed().as_secs() <= MESSAGE_ID_TIMEOUT
+        self.used_message_ids.retain(|_, &mut instant| {
+            cur_instant.duration_since(instant).as_secs() <= MESSAGE_ID_TIMEOUT
         });
     }
 }
