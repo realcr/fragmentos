@@ -1,11 +1,9 @@
-
-use std::time::{Instant, Duration};
+use std::time::{Instant};
 use std::collections::{HashMap};
 
 use ::shares::{DataShare};
-use ::messages::{MESSAGE_ID_LEN, ECC_LEN, NONCE_LEN,
-    unite_message, correct_frag_message,
-    calc_message_id};
+use ::messages::{MESSAGE_ID_LEN, ECC_LEN,
+    unite_message, correct_frag_message};
 
 const MESSAGE_ID_TIMEOUT: u64 = 30;
 
@@ -50,7 +48,7 @@ impl FragStateMachine {
             None => {return None;},
         };
 
-        let message_id = array_ref![corrected,0 , MESSAGE_ID_LEN];
+        let message_id = array_ref![corrected, 0, MESSAGE_ID_LEN];
 
         if self.used_message_ids.contains_key(message_id) {
             // Refresh message_id entry inside used_message_ids:
@@ -116,25 +114,11 @@ impl FragStateMachine {
 
         // Avoid non determinism by sorting:
         data_shares.sort();
-        let t = match unite_message(message_id, &data_shares) {
-            Ok(t) => t,
+        Some(match unite_message(message_id, &data_shares) {
+            Ok(m) => m,
             Err(_) => {return None;}
-        };
+        })
 
-        let c_message_id = match calc_message_id(&t) {
-            Ok(message_id) => message_id,
-            Err(_) => {return None;},
-        };
-
-        if &c_message_id != message_id {
-            return None;
-        }
-
-        // Extract the message M from T:
-        let padding_count = t[NONCE_LEN] as usize;
-        let m = &t[NONCE_LEN + 1 .. t.len() - padding_count];
-
-        Some(m.to_vec())
     }
 
     /// A notice about the passing time.
