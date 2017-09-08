@@ -151,6 +151,8 @@ impl FragStateMachine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ::messages::split_message;
+    use std::time::Duration;
 
     #[test]
     fn test_time_tick_basic() {
@@ -162,5 +164,22 @@ mod tests {
         fsm.time_tick(inst);
         fsm.time_tick(inst2);
         fsm.time_tick(inst3);
+    }
+
+    #[test]
+    fn test_received_frag_message() {
+        let mut fsm = FragStateMachine::new();
+        let cur_inst = Instant::now();
+
+        let orig_message = b"This is some message to be split";
+        let frags = split_message(orig_message, 
+                                  b"nonce123", 22).unwrap();
+
+        let b = (frags.len() + 1) / 2;
+        for i in 0 .. b-1 {
+            assert_eq!(fsm.received_frag_message(&frags[i], cur_inst), None);
+        }
+        let united = fsm.received_frag_message(&frags[frags.len() - 1], cur_inst).unwrap();
+        assert_eq!(united, orig_message);
     }
 }
