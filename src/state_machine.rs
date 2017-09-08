@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn test_received_frag_message() {
+    fn test_received_frag_message_basic() {
         let mut fsm = FragStateMachine::new();
         let cur_inst = Instant::now();
 
@@ -181,5 +181,118 @@ mod tests {
         }
         let united = fsm.received_frag_message(&frags[frags.len() - 1], cur_inst).unwrap();
         assert_eq!(united, orig_message);
+    }
+
+    #[test]
+    fn test_received_frag_same() {
+        let mut fsm = FragStateMachine::new();
+        let cur_inst = Instant::now();
+
+        let orig_message = b"This is some message to be split";
+        let frags = split_message(orig_message, 
+                                  b"nonce123", 22).unwrap();
+
+        let b = (frags.len() + 1) / 2;
+        for i in 0 .. b-2 {
+            assert_eq!(fsm.received_frag_message(&frags[i], cur_inst), None);
+        }
+        // Receive the same frag many times:
+        for _ in 0 .. 100 {
+            assert_eq!(fsm.received_frag_message(&frags[b-2], cur_inst), None);
+        }
+
+        let united = fsm.received_frag_message(&frags[frags.len() - 1], cur_inst).unwrap();
+        assert_eq!(united, orig_message);
+    }
+
+    #[test]
+    fn test_received_frag_late() {
+        let mut fsm = FragStateMachine::new();
+        let mut cur_inst = Instant::now();
+
+        let orig_message = b"This is some message to be split";
+        let frags = split_message(orig_message, 
+                                  b"nonce123", 22).unwrap();
+
+        let b = (frags.len() + 1) / 2;
+        for i in 0 .. b-1 {
+            assert_eq!(fsm.received_frag_message(&frags[i], cur_inst), None);
+        }
+
+        // A lot of time has passed...
+        cur_inst += Duration::new(MESSAGE_ID_TIMEOUT + 1,0);
+        fsm.time_tick(cur_inst);
+
+        // Last frag is too late:
+        assert_eq!(fsm.received_frag_message(&frags[frags.len() - 1], cur_inst), None);
+
+        // Time moved a bit
+        cur_inst += Duration::new(1,0);
+
+        // We can't process the message again, because its id is inside the used_message_ids.
+        for i in 0 .. b {
+            assert_eq!(fsm.received_frag_message(&frags[i], cur_inst), None);
+        }
+
+        // If we wait a bit, the message will be removed from used_message_ids.
+        cur_inst += Duration::new(MESSAGE_ID_TIMEOUT + 1,0);
+        fsm.time_tick(cur_inst);
+
+        // Now we should be able to get the same message again:
+        for i in 0 .. b - 1 {
+            assert_eq!(fsm.received_frag_message(&frags[i], cur_inst), None);
+        }
+        let united = fsm.received_frag_message(&frags[frags.len() - 1], cur_inst).unwrap();
+        assert_eq!(united, orig_message);
+
+    }
+
+    #[test]
+    fn test_received_frag_rest_frags_ignored() {
+        let mut fsm = FragStateMachine::new();
+        let mut cur_inst = Instant::now();
+
+        let orig_message = b"This is some message to be split";
+        let frags = split_message(orig_message, 
+                                  b"nonce123", 22).unwrap();
+
+        let b = (frags.len() + 1) / 2;
+        for i in 0 .. b-1 {
+            assert_eq!(fsm.received_frag_message(&frags[i], cur_inst), None);
+        }
+
+        // frag number b:
+        let united = fsm.received_frag_message(&frags[frags.len() - 1], cur_inst).unwrap();
+        assert_eq!(united, orig_message);
+
+        // A litle time has passed:
+        cur_inst += Duration::new(1,0);
+        fsm.time_tick(cur_inst);
+
+        // We now get all the other frags. All of them should be ignored:
+        for i in b .. frags.len() {
+            assert_eq!(fsm.received_frag_message(&frags[i], cur_inst), None);
+        }
+    }
+
+    #[test]
+    fn test_received_frag_cur_messages_timeout() {
+        let mut fsm = FragStateMachine::new();
+        let mut cur_inst = Instant::now();
+
+        let orig_message = b"This is some message to be split";
+        let frags = split_message(orig_message, 
+                                  b"nonce123", 22).unwrap();
+
+        let b = (frags.len() + 1) / 2;
+        for i in 0 .. b - 1 {
+            assert_eq!(fsm.received_frag_message(&frags[i], cur_inst), None);
+            cur_inst += Duration::new(MESSAGE_ID_TIMEOUT - 1,0);
+            fsm.time_tick(cur_inst);
+        }
+
+        // Frag b is ignored, because after about the second frag sent the cur_message entry was
+        // removed, and message id was moved to used_message_ids.
+        assert_eq!(fsm.received_frag_message(&frags[frags.len() - 1], cur_inst), None);;
     }
 }
