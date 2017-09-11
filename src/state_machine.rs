@@ -14,7 +14,7 @@ struct CurMessage {
     data_shares: HashMap<u8, Vec<u8>>, // input -> data
 }
 
-struct FragStateMachine {
+pub struct FragStateMachine {
     used_message_ids: HashMap<[u8; MESSAGE_ID_LEN], Instant>,
     cur_messages: HashMap<[u8; MESSAGE_ID_LEN], CurMessage>,
 }
@@ -30,7 +30,7 @@ struct FragStateMachine {
 
 
 impl FragStateMachine {
-    fn new() -> Self {
+    pub fn new() -> Self {
         FragStateMachine {
             used_message_ids: HashMap::new(),
             cur_messages: HashMap::new(),
@@ -39,7 +39,7 @@ impl FragStateMachine {
 
     /// Process a newly received Fragmentos message.
     /// Possibly return a reconstructed message.
-    fn received_frag_message(&mut self, frag_message: &[u8], 
+    pub fn received_frag_message(&mut self, frag_message: &[u8], 
                              cur_instant: Instant) -> Option<Vec<u8>> {
 
         // Use the error correcting code to try to correct the error if possible.
@@ -123,7 +123,7 @@ impl FragStateMachine {
 
     /// A notice about the passing time.
     /// Possibly use this to clean up old entries.
-    fn time_tick(&mut self, cur_instant: Instant) {
+    pub fn time_tick(&mut self, cur_instant: Instant) {
 
         // Cleanup old entries from cur_messages. 
         // For any such cleaned up message, move its message_id to used_message_ids.
