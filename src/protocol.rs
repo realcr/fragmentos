@@ -9,62 +9,54 @@ use self::futures::{Future, Poll, Async};
 use ::state_machine::{FragStateMachine};
 
 /// T: Return buffer, F: future, A: address type
-struct FragMsgReceiver<'a,T:'a,F:'a,A> 
-    where F: Future<Item=(T, usize, A), Error=io::Error>,
-          T: AsMut<[u8]> {
+struct FragMsgReceiver<'a,'b:'a,F:'a,A> 
+    where F: Future<Item=(&'b mut [u8] , usize, A), Error=io::Error> {
 
     frag_state_machine: FragStateMachine,
-    recv_dgram: &'a Fn(T) -> F,
+    recv_dgram: &'a Fn(&'b mut [u8]) -> F,
     get_cur_instant: &'a Fn() -> Instant,
 }
 
 
-struct RecvMsg<'a,T:'a,F:'a,A>
-    where F: Future<Item=(T, usize, A), Error=io::Error>,
-          T: AsMut<[u8]> {
-    state: RecvState<'a,T,F,A>,
+struct RecvMsg<'a,'b:'a,F:'a,A>
+    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
+    state: RecvState<'a,'b,F,A>,
 }
 
-struct ReadingState<'a,T:'a,F:'a,A> 
-    where F: Future<Item=(T, usize, A), Error=io::Error>,
-          T: AsMut<[u8]> {
+struct ReadingState<'a,'b:'a,F:'a,A> 
+    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
 
-    frag_msg_receiver: FragMsgReceiver<'a,T,F,A>,
+    frag_msg_receiver: FragMsgReceiver<'a,'b,F,A>,
     temp_buff: Vec<u8>,
-    res_buff: T,
+    res_buff: &'b mut [u8],
     opt_read_future: Option<F>,
 }
 
-enum RecvState<'a,T:'a,F:'a,A> 
-    where F: Future<Item=(T, usize, A), Error=io::Error>,
-          T: AsMut<[u8]> {
+enum RecvState<'a,'b:'a,F:'a,A> 
+    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
 
-    Reading(ReadingState<'a,T,F,A>),
+    Reading(ReadingState<'a,'b,F,A>),
     Done,
 }
 
-impl<'a,T,F,A> Future for RecvMsg<'a,T,F,A>
-    where F: Future<Item=(T, usize, A), Error=io::Error>,
-          T: AsMut<[u8]> {
+impl<'a,'b:'a,F,A> Future for RecvMsg<'a,'b,F,A>
+    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
 
     // FragMsgReceiver, buffer, num_bytes, address
-    type Item = (FragMsgReceiver<'a,T,F,A>, T, usize, A);
+    type Item = (FragMsgReceiver<'a,'b,F,A>, F::Item);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, io::Error> {
 
         let reading_state = match self.state {
             RecvState::Done => panic!("polling RecvMsg after it's done"),
-            RecvState::Reading(reading_state) => reading_state,
+            RecvState::Reading(ref mut reading_state) => reading_state,
         };
 
-        // TODO: What kind of buffer argument does recv_dgram takes?
-        // Search for an example of using UdpSocket, 
-        // and see what they provide it as input buffer. Can it resize a vector automatically?
-        //
-        // It seems like it goes down all the way to mio.
         
-        let fdgram = match reading_state.opt_read_future {
+        // Obtain a future datagram, 
+        // always leaving readindg_state.opt_read_future containing None:
+        let mut fdgram = match mem::replace(&mut reading_state.opt_read_future, None) {
             Some(read_future) => read_future,
             None => (*reading_state.frag_msg_receiver.recv_dgram)(
                 &mut reading_state.temp_buff),
@@ -72,40 +64,57 @@ impl<'a,T,F,A> Future for RecvMsg<'a,T,F,A>
 
         // Try to obtain a message:
         // let mut fdgram = (*frag_msg_receiver.recv_dgram)(temp_buff);
-        let (mut buf, n ,address) = match fdgram.poll() {
+        let (mut temp_buff, n ,address) = match fdgram.poll() {
             Ok(Async::Ready(t)) => t,
-            Ok(Async::NotReady) => return Ok(Async::NotReady),
-            Err(e) => return Err(e),
+            Ok(Async::NotReady) => {
+                reading_state.opt_read_future = Some(fdgram);
+                return Ok(Async::NotReady);
+            },
+            Err(e) => {
+                reading_state.opt_read_future = Some(fdgram);
+                return Err(e);
+            }
         };
 
         // Obtain current time:
-        let cur_instant = (*frag_msg_receiver.get_cur_instant)();
+        let cur_instant = (*reading_state.frag_msg_receiver.get_cur_instant)();
 
         // Add fragment to state machine, possibly reconstructing a full message:
-        let msg = match frag_msg_receiver.frag_state_machine.received_frag_message(
-            temp_buff, cur_instant) {
+        let msg = match reading_state.frag_msg_receiver
+            .frag_state_machine.received_frag_message(
+                &temp_buff, cur_instant) {
 
             Some(msg) => msg,
             None => return Ok(Async::NotReady),
         };
 
+
         // We have a full message:
         match mem::replace(&mut self.state, RecvState::Done) {
-            RecvState::Reading {frag_msg_receiver, .. } => 
-                Ok(Async::Ready((frag_msg_receiver, msg, address))),
+            RecvState::Reading(reading_state) => {
+
+                // Make sure that we have enough room to write to buffer:
+                if reading_state.res_buff.len() < msg.len() {
+                    panic!("Destination buffer too short!");
+                }
+
+                reading_state.res_buff[0 .. msg.len()].copy_from_slice(&msg);
+
+                let msg_item = (reading_state.res_buff, msg.len(), address);
+                Ok(Async::Ready((reading_state.frag_msg_receiver, msg_item)))
+            }
             RecvState::Done => panic!("Invalid state"),
         }
 
     }
 }
 
-impl<'a,T,F,A> FragMsgReceiver<'a,T,F,A> 
-    where F: Future<Item=(T, usize, A), Error=io::Error>,
-          T: AsMut<[u8]> {
+impl<'a,'b,F,A> FragMsgReceiver<'a,'b,F,A> 
+    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
 
     fn new(get_cur_instant: &'a Fn() -> Instant,
-           recv_dgram: &'a Fn(T) -> F) -> Self
-        where T: AsMut<[u8]>, F: Future<Item=(T, usize, A),Error=io::Error>  {
+           recv_dgram: &'a Fn(&'b mut [u8]) -> F) -> Self
+        where F: Future<Item=(&'b mut [u8], usize, A),Error=io::Error>  {
 
         FragMsgReceiver {
             frag_state_machine: FragStateMachine::new(),
@@ -114,7 +123,7 @@ impl<'a,T,F,A> FragMsgReceiver<'a,T,F,A>
         }
     }
 
-    fn recv_msg(self, res_buff: T) -> RecvMsg<'a,T,F,A> {
+    fn recv_msg(self, res_buff: &'b mut [u8]) -> RecvMsg<'a,'b,F,A> {
         RecvMsg {
             state: RecvState::Reading(
                 ReadingState {
