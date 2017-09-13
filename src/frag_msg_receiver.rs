@@ -8,22 +8,22 @@ use self::futures::{Future, Poll, Async};
 
 use ::state_machine::{FragStateMachine};
 
-/// T: Return buffer, F: future, A: address type
-struct FragMsgReceiver<'a,'b:'a,F:'a,A> 
+/// F: future, A: address type
+struct FragMsgReceiver<'a,'b,F:'a,A> 
     where F: Future<Item=(&'b mut [u8] , usize, A), Error=io::Error> {
 
     frag_state_machine: FragStateMachine,
-    recv_dgram: &'a Fn(&mut [u8]) -> F,
-    get_cur_instant: &'a Fn() -> Instant,
+    recv_dgram: &'a mut FnMut(&mut [u8]) -> F,
+    get_cur_instant: &'a mut FnMut() -> Instant,
 }
 
 
-struct RecvMsg<'a,'b:'a,F:'a,A>
+struct RecvMsg<'a,'b,F:'a,A>
     where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
     state: RecvState<'a,'b,F,A>,
 }
 
-struct ReadingState<'a,'b:'a,F:'a,A> 
+struct ReadingState<'a,'b,F:'a,A> 
     where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
 
     frag_msg_receiver: FragMsgReceiver<'a,'b,F,A>,
@@ -32,14 +32,14 @@ struct ReadingState<'a,'b:'a,F:'a,A>
     opt_read_future: Option<F>,
 }
 
-enum RecvState<'a,'b:'a,F:'a,A> 
+enum RecvState<'a,'b,F:'a,A> 
     where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
 
     Reading(ReadingState<'a,'b,F,A>),
     Done,
 }
 
-impl<'a,'b:'a,F,A> Future for RecvMsg<'a,'b,F,A>
+impl<'a,'b,F,A> Future for RecvMsg<'a,'b,F,A>
     where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
 
     // FragMsgReceiver, buffer, num_bytes, address
@@ -65,7 +65,7 @@ impl<'a,'b:'a,F,A> Future for RecvMsg<'a,'b,F,A>
 
             // Try to obtain a message:
             // let mut fdgram = (*frag_msg_receiver.recv_dgram)(temp_buff);
-            let (mut temp_buff, n ,address) = match fdgram.poll() {
+            let (temp_buff, n ,address) = match fdgram.poll() {
                 Ok(Async::Ready(t)) => t,
                 Ok(Async::NotReady) => {
                     reading_state.opt_read_future = Some(fdgram);
@@ -83,7 +83,7 @@ impl<'a,'b:'a,F,A> Future for RecvMsg<'a,'b,F,A>
             // Add fragment to state machine, possibly reconstructing a full message:
             let msg = match reading_state.frag_msg_receiver
                 .frag_state_machine.received_frag_message(
-                    &temp_buff, cur_instant) {
+                    &temp_buff[0..n], cur_instant) {
 
                 Some(msg) => msg,
                 None => return Ok(Async::NotReady),
@@ -114,9 +114,9 @@ impl<'a,'b:'a,F,A> Future for RecvMsg<'a,'b,F,A>
 impl<'a,'b,F,A> FragMsgReceiver<'a,'b,F,A> 
     where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
 
-    fn new(get_cur_instant: &'a Fn() -> Instant,
-           recv_dgram: &'a Fn(&mut [u8]) -> F) -> Self
-        where F: Future<Item=(&'b mut [u8], usize, A),Error=io::Error>  {
+    fn new(get_cur_instant: &'a mut FnMut() -> Instant,
+           recv_dgram: &'a mut FnMut(&mut [u8]) -> F) -> Self
+        where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error>  {
 
         FragMsgReceiver {
             frag_state_machine: FragStateMachine::new(),
@@ -136,5 +136,66 @@ impl<'a,'b,F,A> FragMsgReceiver<'a,'b,F,A>
                 }
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate futures;
+
+    use super::*;
+    use std::time::{Instant, Duration};
+    use std::collections::VecDeque;
+    use self::futures::future;
+
+    use ::messages::{split_message};
+
+    #[test]
+    fn test_frag_msg_receiver_basic() {
+
+        // Lists of messages, addresses and time instants:
+        let mut messages: VecDeque<Vec<u8>> = VecDeque::new();
+        let mut addresses: VecDeque<u32> = VecDeque::new();
+        let mut instants: VecDeque<Instant> = VecDeque::new();
+
+        let orig_message = b"This is some message to be split";
+        let frags = split_message(orig_message, 
+                                  b"nonce123", 22).unwrap();
+        assert!(frags.len() > 1);
+        assert!(frags.len() % 2 == 1);
+
+        let b = (frags.len() + 1) / 2;
+        let mut cur_instant = Instant::now();
+
+        for frag in frags.into_iter().take(b) {
+            messages.push_back(frag);
+            addresses.push_back(0x12345678);
+            instants.push_back(cur_instant);
+
+            // Add a small time duration between the receipt 
+            // of two subsequent fragments:
+            cur_instant += Duration::new(0,20);
+        }
+
+        let get_cur_instant = || instants.pop_front().unwrap();
+        let recv_dgram = |buff: &mut [u8]| {
+            let cur_msg = messages.pop_front().unwrap();
+            let cur_address = addresses.pop_front().unwrap();
+            if cur_msg.len() > buff.len() {
+                panic!("Message too large for buffer!");
+            }
+            // Copy message into buffer:
+            buff[0 .. cur_msg.len()].copy_from_slice(&cur_msg);
+            // Return completed future:
+            future::ok::<_,io::Error>((buff, cur_msg.len(), cur_address))
+        };
+
+        let fmr = FragMsgReceiver::new(&mut get_cur_instant, &mut recv_dgram);
+        /*
+        let buff: &[u8] = &[0; 2048];
+        let fut_msg = fmr.recv_msg(&mut buff);
+        fut_msg.wait();
+        */
+
     }
 }
