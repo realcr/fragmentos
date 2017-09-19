@@ -8,42 +8,54 @@ use self::futures::{Future, Poll, Async};
 
 use ::state_machine::{FragStateMachine};
 
-/// F: future, A: address type
-struct FragMsgReceiver<'a,'b,F:'a,A> 
-    where F: Future<Item=(&'b mut [u8] , usize, A), Error=io::Error> {
 
+struct FragMsgReceiver<A,R,Q>
+where 
+    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    Q: FnMut() -> Instant,
+{
     frag_state_machine: FragStateMachine,
-    recv_dgram: &'a mut FnMut(&mut [u8]) -> F,
-    get_cur_instant: &'a mut FnMut() -> Instant,
+    recv_dgram: R,
+    get_cur_instant: Q,
 }
 
-
-struct RecvMsg<'a,'b,F:'a,A>
-    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
-    state: RecvState<'a,'b,F,A>,
-}
-
-struct ReadingState<'a,'b,F:'a,A> 
-    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
-
-    frag_msg_receiver: FragMsgReceiver<'a,'b,F,A>,
+struct ReadingState<'c,A,R,Q> 
+where 
+    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    Q: FnMut() -> Instant,
+{
+    frag_msg_receiver: FragMsgReceiver<A,R,Q>,
     temp_buff: Vec<u8>,
-    res_buff: &'b mut [u8],
-    opt_read_future: Option<F>,
+    res_buff: &'c mut [u8],
+    opt_read_future: Option<Box<Future<Item=(&'c mut [u8], usize, A), Error=io::Error>>>,
 }
 
-enum RecvState<'a,'b,F:'a,A> 
-    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
-
-    Reading(ReadingState<'a,'b,F,A>),
+enum RecvState<'c,A,R,Q>
+where 
+    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    Q: FnMut() -> Instant,
+{
+    Reading(ReadingState<'c,A,R,Q>),
     Done,
 }
 
-impl<'a,'b,F,A> Future for RecvMsg<'a,'b,F,A>
-    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
+struct RecvMsg<'c,A,R,Q>
+where 
+    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    Q: FnMut() -> Instant,
+{
+    state: RecvState<'c,A,R,Q>,
+}
+
+
+impl<'c,A,R,Q> Future for RecvMsg<'c,A,R,Q>
+where 
+    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    Q: FnMut() -> Instant,
+{
 
     // FragMsgReceiver, buffer, num_bytes, address
-    type Item = (FragMsgReceiver<'a,'b,F,A>, F::Item);
+    type Item = (FragMsgReceiver<A,R,Q>, (&'c mut [u8], usize, A));
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, io::Error> {
@@ -53,13 +65,15 @@ impl<'a,'b,F,A> Future for RecvMsg<'a,'b,F,A>
                 RecvState::Done => panic!("polling RecvMsg after it's done"),
                 RecvState::Reading(ref mut reading_state) => reading_state,
             };
-
             
             // Obtain a future datagram, 
             // always leaving readindg_state.opt_read_future containing None:
+            
+            // TODO: Find out how to use take here (Instead of mem::replace), as suggested in one
+            // of the SO questions.
             let mut fdgram = match mem::replace(&mut reading_state.opt_read_future, None) {
                 Some(read_future) => read_future,
-                None => (*reading_state.frag_msg_receiver.recv_dgram)(
+                None => (reading_state.frag_msg_receiver.recv_dgram)(
                     &mut reading_state.temp_buff),
             };
 
@@ -78,7 +92,7 @@ impl<'a,'b,F,A> Future for RecvMsg<'a,'b,F,A>
             };
 
             // Obtain current time:
-            let cur_instant = (*reading_state.frag_msg_receiver.get_cur_instant)();
+            let cur_instant = (reading_state.frag_msg_receiver.get_cur_instant)();
 
             // Add fragment to state machine, possibly reconstructing a full message:
             let msg = match reading_state.frag_msg_receiver
@@ -111,12 +125,14 @@ impl<'a,'b,F,A> Future for RecvMsg<'a,'b,F,A>
     }
 }
 
-impl<'a,'b,F,A> FragMsgReceiver<'a,'b,F,A> 
-    where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error> {
 
-    fn new(get_cur_instant: &'a mut FnMut() -> Instant,
-           recv_dgram: &'a mut FnMut(&mut [u8]) -> F) -> Self
-        where F: Future<Item=(&'b mut [u8], usize, A), Error=io::Error>  {
+
+impl<A,R,Q> FragMsgReceiver<A,R,Q>
+where
+    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    Q: FnMut() -> Instant,
+{
+    fn new(get_cur_instant: Q, recv_dgram: R) -> Self {
 
         FragMsgReceiver {
             frag_state_machine: FragStateMachine::new(),
@@ -125,7 +141,7 @@ impl<'a,'b,F,A> FragMsgReceiver<'a,'b,F,A>
         }
     }
 
-    fn recv_msg(self, res_buff: &'b mut [u8]) -> RecvMsg<'a,'b,F,A> {
+    fn recv_msg<'c>(self, res_buff: &'c mut [u8]) -> RecvMsg<'c,A,R,Q> {
         RecvMsg {
             state: RecvState::Reading(
                 ReadingState {
@@ -190,7 +206,9 @@ mod tests {
             future::ok::<_,io::Error>((buff, cur_msg.len(), cur_address))
         };
 
-        let fmr = FragMsgReceiver::new(&mut get_cur_instant, &mut recv_dgram);
+
+
+        let fmr = FragMsgReceiver::new(&mut recv_dgram);
         /*
         let buff: &[u8] = &[0; 2048];
         let fut_msg = fmr.recv_msg(&mut buff);
