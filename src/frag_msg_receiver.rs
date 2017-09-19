@@ -67,18 +67,15 @@ where
             };
             
             // Obtain a future datagram, 
-            // always leaving readindg_state.opt_read_future containing None:
+            // always leaving reading_state.opt_read_future containing None:
             
-            // TODO: Find out how to use take here (Instead of mem::replace), as suggested in one
-            // of the SO questions.
-            let mut fdgram = match mem::replace(&mut reading_state.opt_read_future, None) {
+            let mut fdgram = match reading_state.opt_read_future.take() {
                 Some(read_future) => read_future,
                 None => (reading_state.frag_msg_receiver.recv_dgram)(
                     &mut reading_state.temp_buff),
             };
 
             // Try to obtain a message:
-            // let mut fdgram = (*frag_msg_receiver.recv_dgram)(temp_buff);
             let (temp_buff, n ,address) = match fdgram.poll() {
                 Ok(Async::Ready(t)) => t,
                 Ok(Async::NotReady) => {
@@ -121,7 +118,6 @@ where
             }
             RecvState::Done => panic!("Invalid state"),
         }
-
     }
 }
 
