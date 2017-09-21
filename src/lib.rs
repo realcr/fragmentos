@@ -8,6 +8,7 @@ mod shares;
 mod messages;
 mod state_machine;
 mod frag_msg_receiver;
+// mod compile_check;
 
 #[cfg(test)]
 mod tests {
