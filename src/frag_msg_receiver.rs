@@ -11,7 +11,7 @@ use ::state_machine::{FragStateMachine};
 
 struct FragMsgReceiver<A,R,Q>
 where 
-    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    R: for <'r> FnMut(&'r mut [u8]) -> Box<Future<Item=(&'r mut [u8], usize, A), Error=io::Error> + 'r>,
     Q: FnMut() -> Instant,
 {
     frag_state_machine: FragStateMachine,
@@ -21,18 +21,18 @@ where
 
 struct ReadingState<'c,A,R,Q> 
 where 
-    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    R: for <'r> FnMut(&'r mut [u8]) -> Box<Future<Item=(&'r mut [u8], usize, A), Error=io::Error> + 'r>,
     Q: FnMut() -> Instant,
 {
     frag_msg_receiver: FragMsgReceiver<A,R,Q>,
     temp_buff: Vec<u8>,
     res_buff: &'c mut [u8],
-    opt_read_future: Option<Box<Future<Item=(&'c mut [u8], usize, A), Error=io::Error>>>,
+    opt_read_future: Option<Box<Future<Item=(&'c mut [u8], usize, A), Error=io::Error> + 'c>>,
 }
 
 enum RecvState<'c,A,R,Q>
 where 
-    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    R: for <'r> FnMut(&'r mut [u8]) -> Box<Future<Item=(&'r mut [u8], usize, A), Error=io::Error> + 'r>,
     Q: FnMut() -> Instant,
 {
     Reading(ReadingState<'c,A,R,Q>),
@@ -41,7 +41,7 @@ where
 
 struct RecvMsg<'c,A,R,Q>
 where 
-    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    R: for <'r> FnMut(&'r mut [u8]) -> Box<Future<Item=(&'r mut [u8], usize, A), Error=io::Error> + 'r>,
     Q: FnMut() -> Instant,
 {
     state: RecvState<'c,A,R,Q>,
@@ -50,7 +50,7 @@ where
 
 impl<'c,A,R,Q> Future for RecvMsg<'c,A,R,Q>
 where 
-    R: FnMut(&mut [u8]) -> Box<Future<Item=(&mut [u8], usize, A), Error=io::Error>>,
+    R: for <'r> FnMut(&'r mut [u8]) -> Box<Future<Item=(&'r mut [u8], usize, A), Error=io::Error> + 'r>,
     Q: FnMut() -> Instant,
 {
 
