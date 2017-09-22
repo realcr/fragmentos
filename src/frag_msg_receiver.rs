@@ -88,9 +88,6 @@ where
                 ReadingBuff::ReadFuture(fdgram) => fdgram,
             };
 
-            // reading_state.opt_read_future = Some(fdgram);
-
-
             // Try to obtain a message:
             let (temp_buff, n ,address) = match fdgram.poll() {
                 Ok(Async::Ready(t)) => t,
