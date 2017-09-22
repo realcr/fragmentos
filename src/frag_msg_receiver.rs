@@ -20,7 +20,7 @@ where
     recv_dgram: R,
     get_cur_instant: Q,
     max_dgram_len: usize,
-    phantom_A: PhantomData<A>,
+    phantom_a: PhantomData<A>,
 }
 
 enum ReadingBuff<A,F> 
@@ -86,8 +86,8 @@ where
                 RecvState::Reading(ref mut reading_state) => reading_state,
             };
 
-            let mut total_msg: Vec<u8>;
-            let mut last_address: A;
+            let total_msg: Vec<u8>;
+            let last_address: A;
 
             loop {
                 let mut fdgram = match mem::replace(
@@ -126,7 +126,7 @@ where
                 mem::replace(&mut reading_state.reading_buff,
                              ReadingBuff::TempBuff(temp_buff));
 
-                let msg = match msg_res {
+                match msg_res {
                     Some(msg) => {
                         // We got a full message. 
                         // We break outside of the loop.
@@ -166,17 +166,17 @@ where
     R: FnMut(Vec<u8>) -> F,
     Q: FnMut() -> Instant,
 {
-    fn new(get_cur_instant: Q, recv_dgram: R, max_dgram_len: usize) -> Self {
+    pub fn new(get_cur_instant: Q, recv_dgram: R, max_dgram_len: usize) -> Self {
         FragMsgReceiver {
             frag_state_machine: FragStateMachine::new(),
             recv_dgram,
             get_cur_instant,
             max_dgram_len,
-            phantom_A: PhantomData,
+            phantom_a: PhantomData,
         }
     }
 
-    fn recv_msg<B>(self, res_buff: B ) -> RecvMsg<B,A,R,Q,F> 
+    pub fn recv_msg<B>(self, res_buff: B ) -> RecvMsg<B,A,R,Q,F> 
     where
         B: AsMut<[u8]>,
     {
