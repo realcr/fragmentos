@@ -29,12 +29,12 @@ pub const NONCE_LEN: usize = 8;
 
 /// Calculate max possible message for Fragmentos, given the maximum datagram allowed on the
 /// underlying protocol.
-fn max_message(max_datagram: usize) -> Result<usize,()> {
+pub fn max_message(max_dgram_len: usize) -> Result<usize,()> {
     let fields_len = MESSAGE_ID_LEN + 1 + 1 + ECC_LEN;
-    if max_datagram <= fields_len {
+    if max_dgram_len <= fields_len {
         Err(())
     } else {
-        Ok((128 * (max_datagram - fields_len)) - (NONCE_LEN + 1))
+        Ok((128 * (max_dgram_len - fields_len)) - (NONCE_LEN + 1))
     }
 }
 
