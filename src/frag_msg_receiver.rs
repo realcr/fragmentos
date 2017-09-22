@@ -172,7 +172,6 @@ where
     Q: FnMut() -> Instant,
 {
     pub fn new(get_cur_instant: Q, recv_dgram: R, max_dgram_len: usize) -> Self {
-        // let cur_instant = get_cur_instant();
         FragMsgReceiver {
             frag_state_machine: FragStateMachine::new(),
             recv_dgram,
