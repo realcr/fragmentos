@@ -121,6 +121,9 @@ where
                 let cur_instant = (reading_state.frag_msg_receiver.get_cur_instant)();
 
                 // Possibly clean up some old message fragments:
+                // TODO: This could be inefficient. In the future we might need to make time_tick
+                // work faster or add some kind of conditional mechanism to run this code only once
+                // in a while, instead of running it for every incoming message.
                 reading_state.frag_msg_receiver.frag_state_machine.time_tick(cur_instant);
 
                 // Add fragment to state machine, possibly reconstructing a full message:
