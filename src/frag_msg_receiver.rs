@@ -20,7 +20,7 @@ where
     recv_dgram: R,
     get_cur_instant: Q,
     max_dgram_len: usize,
-    phantomA: PhantomData<A>,
+    phantom_A: PhantomData<A>,
 }
 
 enum ReadingBuff<A,F> 
@@ -66,6 +66,7 @@ where
 }
 
 
+
 impl<B,A,R,Q,F> Future for RecvMsg<B,A,R,Q,F>
 where 
     F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
@@ -79,50 +80,64 @@ where
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, io::Error> {
-
         let (msg, address) = {
             let reading_state = match self.state {
                 RecvState::Done => panic!("polling RecvMsg after it's done."),
                 RecvState::Reading(ref mut reading_state) => reading_state,
             };
 
-            let mut fdgram = match mem::replace(
-                &mut reading_state.reading_buff, ReadingBuff::Empty) {
+            let mut total_msg: Vec<u8>;
+            let mut last_address: A;
 
-                ReadingBuff::Empty => panic!("Invalid state for reading_buff."),
-                ReadingBuff::TempBuff(temp_buff) =>
-                    (reading_state.frag_msg_receiver.recv_dgram)(
-                        temp_buff),
-                ReadingBuff::ReadFuture(fdgram) => fdgram,
-            };
+            loop {
+                let mut fdgram = match mem::replace(
+                    &mut reading_state.reading_buff, ReadingBuff::Empty) {
 
-            // Try to obtain a message:
-            let (temp_buff, n ,address) = match fdgram.poll() {
-                Ok(Async::Ready(t)) => t,
-                Ok(Async::NotReady) => {
-                    mem::replace(&mut reading_state.reading_buff,
-                                 ReadingBuff::ReadFuture(fdgram));
-                    return Ok(Async::NotReady);
-                },
-                Err(e) => {
-                    mem::replace(&mut reading_state.reading_buff,
-                                 ReadingBuff::ReadFuture(fdgram));
-                    return Err(e);
-                }
-            };
+                    ReadingBuff::Empty => panic!("Invalid state for reading_buff."),
+                    ReadingBuff::TempBuff(temp_buff) =>
+                        (reading_state.frag_msg_receiver.recv_dgram)(
+                            temp_buff),
+                    ReadingBuff::ReadFuture(fdgram) => fdgram,
+                };
 
-            // Obtain current time:
-            let cur_instant = (reading_state.frag_msg_receiver.get_cur_instant)();
+                // Try to obtain a message:
+                let (temp_buff, n ,address) = match fdgram.poll() {
+                    Ok(Async::Ready(t)) => t,
+                    Ok(Async::NotReady) => {
+                        mem::replace(&mut reading_state.reading_buff,
+                                     ReadingBuff::ReadFuture(fdgram));
+                        return Ok(Async::NotReady);
+                    },
+                    Err(e) => {
+                        mem::replace(&mut reading_state.reading_buff,
+                                     ReadingBuff::ReadFuture(fdgram));
+                        return Err(e);
+                    }
+                };
+                // Obtain current time:
+                let cur_instant = (reading_state.frag_msg_receiver.get_cur_instant)();
 
-            // Add fragment to state machine, possibly reconstructing a full message:
-            let msg = match reading_state.frag_msg_receiver
-                .frag_state_machine.received_frag_message(
-                    &temp_buff[0..n], cur_instant) {
+                // Add fragment to state machine, possibly reconstructing a full message:
+               
+                let msg_res = reading_state.frag_msg_receiver
+                    .frag_state_machine.received_frag_message(
+                        &temp_buff[0..n], cur_instant);
 
-                Some(msg) => msg,
-                None => return Ok(Async::NotReady),
-            };
-            (msg, address)
+                mem::replace(&mut reading_state.reading_buff,
+                             ReadingBuff::TempBuff(temp_buff));
+
+                let msg = match msg_res {
+                    Some(msg) => {
+                        // We got a full message. 
+                        // We break outside of the loop.
+                        total_msg = msg;
+                        last_address = address;
+                        break;
+                    }
+                    None => {},
+                };
+            }
+            (total_msg, last_address)
         };
 
         // We have a full message:
@@ -157,7 +172,7 @@ where
             recv_dgram,
             get_cur_instant,
             max_dgram_len,
-            phantomA: PhantomData,
+            phantom_A: PhantomData,
         }
     }
 
@@ -171,8 +186,7 @@ where
                 ReadingState {
                     frag_msg_receiver: self,
                     res_buff,
-                    reading_buff: ReadingBuff::TempBuff(
-                        Vec::with_capacity(max_dgram_len)),
+                    reading_buff: ReadingBuff::TempBuff(vec![0; max_dgram_len]),
                 }
             ),
         }
