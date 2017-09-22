@@ -10,6 +10,9 @@ use self::futures::{Future, Poll, Async};
 use ::state_machine::{FragStateMachine};
 use ::messages::max_message;
 
+// We may run frag_state_machine.time_tick(cur_instant) only every
+// TIME_TICK_TIMEOUT seconds.
+const TIME_TICK_TIMEOUT: u64 = 5;
 
 struct FragMsgReceiver<A,R,Q,F>
 where 
@@ -42,7 +45,7 @@ where
 {
     frag_msg_receiver: FragMsgReceiver<A,R,Q,F>,
     res_buff: B,
-    reading_buff: ReadingBuff<A,F>
+    reading_buff: ReadingBuff<A,F>,
 }
 
 enum RecvState<B,A,R,Q,F>
@@ -65,7 +68,6 @@ where
 {
     state: RecvState<B,A,R,Q,F>,
 }
-
 
 
 impl<B,A,R,Q,F> Future for RecvMsg<B,A,R,Q,F>
@@ -118,6 +120,9 @@ where
                 // Obtain current time:
                 let cur_instant = (reading_state.frag_msg_receiver.get_cur_instant)();
 
+                // Possibly clean up some old message fragments:
+                reading_state.frag_msg_receiver.frag_state_machine.time_tick(cur_instant);
+
                 // Add fragment to state machine, possibly reconstructing a full message:
                
                 let msg_res = reading_state.frag_msg_receiver
@@ -168,6 +173,7 @@ where
     Q: FnMut() -> Instant,
 {
     pub fn new(get_cur_instant: Q, recv_dgram: R, max_dgram_len: usize) -> Self {
+        // let cur_instant = get_cur_instant();
         FragMsgReceiver {
             frag_state_machine: FragStateMachine::new(),
             recv_dgram,
