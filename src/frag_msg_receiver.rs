@@ -10,9 +10,10 @@ use self::futures::{Future, Poll, Async};
 use ::state_machine::{FragStateMachine};
 
 
-struct FragMsgReceiver<A,R,Q>
+struct FragMsgReceiver<A,R,Q,F>
 where 
-    R: FnMut(Vec<u8>) -> Box<Future<Item=(Vec<u8>, usize, A), Error=io::Error>>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    R: FnMut(Vec<u8>) -> F,
     Q: FnMut() -> Instant,
 {
     frag_state_machine: FragStateMachine,
@@ -22,52 +23,59 @@ where
     phantomA: PhantomData<A>,
 }
 
-enum ReadingBuff<A> {
+enum ReadingBuff<A,F> 
+where
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+{
     Empty,
     TempBuff(Vec<u8>),
-    ReadFuture(Box<Future<Item=(Vec<u8>, usize, A), Error=io::Error>>),
+    ReadFuture(F),
 }
 
-struct ReadingState<B,A,R,Q> 
+struct ReadingState<B,A,R,Q,F> 
 where 
-    R: FnMut(Vec<u8>) -> Box<Future<Item=(Vec<u8>, usize, A), Error=io::Error>>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    R: FnMut(Vec<u8>) -> F,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
 {
-    frag_msg_receiver: FragMsgReceiver<A,R,Q>,
+    frag_msg_receiver: FragMsgReceiver<A,R,Q,F>,
     res_buff: B,
-    reading_buff: ReadingBuff<A>
+    reading_buff: ReadingBuff<A,F>
 }
 
-enum RecvState<B,A,R,Q>
+enum RecvState<B,A,R,Q,F>
 where 
-    R: FnMut(Vec<u8>) -> Box<Future<Item=(Vec<u8>, usize, A), Error=io::Error>>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    R: FnMut(Vec<u8>) -> F,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
 {
-    Reading(ReadingState<B,A,R,Q>),
+    Reading(ReadingState<B,A,R,Q,F>),
     Done,
 }
 
-struct RecvMsg<B,A,R,Q>
+struct RecvMsg<B,A,R,Q,F>
 where 
-    R: FnMut(Vec<u8>) -> Box<Future<Item=(Vec<u8>, usize, A), Error=io::Error>>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    R: FnMut(Vec<u8>) -> F,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
 {
-    state: RecvState<B,A,R,Q>,
+    state: RecvState<B,A,R,Q,F>,
 }
 
 
-impl<B,A,R,Q> Future for RecvMsg<B,A,R,Q>
+impl<B,A,R,Q,F> Future for RecvMsg<B,A,R,Q,F>
 where 
-    R: FnMut(Vec<u8>) -> Box<Future<Item=(Vec<u8>, usize, A), Error=io::Error>>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    R: FnMut(Vec<u8>) -> F,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
 {
 
     // FragMsgReceiver, buffer, num_bytes, address
-    type Item = (FragMsgReceiver<A,R,Q>, (B, usize, A));
+    type Item = (FragMsgReceiver<A,R,Q,F>, (B, usize, A));
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, io::Error> {
@@ -137,9 +145,10 @@ where
 }
 
 
-impl<A,R,Q> FragMsgReceiver<A,R,Q>
+impl<A,R,Q,F> FragMsgReceiver<A,R,Q,F>
 where
-    R: FnMut(Vec<u8>) -> Box<Future<Item=(Vec<u8>, usize, A), Error=io::Error>>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    R: FnMut(Vec<u8>) -> F,
     Q: FnMut() -> Instant,
 {
     fn new(get_cur_instant: Q, recv_dgram: R, max_dgram_len: usize) -> Self {
@@ -152,7 +161,7 @@ where
         }
     }
 
-    fn recv_msg<B>(self, res_buff: B ) -> RecvMsg<B,A,R,Q> 
+    fn recv_msg<B>(self, res_buff: B ) -> RecvMsg<B,A,R,Q,F> 
     where
         B: AsMut<[u8]>,
     {
