@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use self::futures::{Future, Poll, Async};
 
 use ::state_machine::{FragStateMachine};
+use ::messages::max_message;
 
 
 struct FragMsgReceiver<A,R,Q,F>
@@ -176,11 +177,15 @@ where
         }
     }
 
-    pub fn recv_msg<B>(self, res_buff: B ) -> RecvMsg<B,A,R,Q,F> 
+    pub fn recv_msg<B>(self, mut res_buff: B ) -> RecvMsg<B,A,R,Q,F> 
     where
         B: AsMut<[u8]>,
     {
         let max_dgram_len = self.max_dgram_len;
+        if res_buff.as_mut().len() < max_message(max_dgram_len).unwrap() {
+            panic!("res_buff is too short to hold any Fragmentos message.");
+        }
+
         RecvMsg {
             state: RecvState::Reading(
                 ReadingState {
@@ -245,14 +250,17 @@ mod tests {
             // Return completed future:
             future::ok::<_,io::Error>((buff, cur_msg.len(), cur_address))
         };
+        // A maximum size of underlying datagram:
+        const MAX_DGRAM_LEN: usize = 512;
 
-        let res_vec = vec![0; 4096];
+        // Create a vector that could hold any Fragmentos message:
+        let res_vec = vec![0; max_message(MAX_DGRAM_LEN).unwrap()];
 
-        let fmr = FragMsgReceiver::new(get_cur_instant, recv_dgram, 512);
+        let fmr = FragMsgReceiver::new(get_cur_instant, recv_dgram, MAX_DGRAM_LEN);
         let fut_msg = fmr.recv_msg(res_vec);
 
         let mut core = Core::new().unwrap();
-        let (fmr, (message, length, address)) = core.run(fut_msg).unwrap();
+        let (_fmr, (message, length, address)) = core.run(fut_msg).unwrap();
 
         assert_eq!(address,0x12345678);
         assert_eq!(&message[0..length], orig_message);
