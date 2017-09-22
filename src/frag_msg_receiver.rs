@@ -10,10 +10,6 @@ use self::futures::{Future, Poll, Async};
 use ::state_machine::{FragStateMachine};
 use ::messages::max_message;
 
-// We may run frag_state_machine.time_tick(cur_instant) only every
-// TIME_TICK_TIMEOUT seconds.
-const TIME_TICK_TIMEOUT: u64 = 5;
-
 struct FragMsgReceiver<A,R,Q,F>
 where 
     F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
