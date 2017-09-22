@@ -196,11 +196,13 @@ where
 #[cfg(test)]
 mod tests {
     extern crate futures;
+    extern crate tokio_core;
 
     use super::*;
     use std::time::{Instant, Duration};
     use std::collections::VecDeque;
     use self::futures::future;
+    use self::tokio_core::reactor::Core;
 
     use ::messages::{split_message};
 
@@ -232,7 +234,7 @@ mod tests {
         }
 
         let get_cur_instant = || instants.pop_front().unwrap();
-        let recv_dgram = |buff: &mut [u8]| {
+        let recv_dgram = |mut buff: Vec<u8>| {
             let cur_msg = messages.pop_front().unwrap();
             let cur_address = addresses.pop_front().unwrap();
             if cur_msg.len() > buff.len() {
@@ -244,14 +246,15 @@ mod tests {
             future::ok::<_,io::Error>((buff, cur_msg.len(), cur_address))
         };
 
+        let res_vec = vec![0; 4096];
 
+        let fmr = FragMsgReceiver::new(get_cur_instant, recv_dgram, 512);
+        let fut_msg = fmr.recv_msg(res_vec);
 
-        let fmr = FragMsgReceiver::new(&mut recv_dgram);
-        /*
-        let buff: &[u8] = &[0; 2048];
-        let fut_msg = fmr.recv_msg(&mut buff);
-        fut_msg.wait();
-        */
+        let mut core = Core::new().unwrap();
+        let (fmr, (message, length, address)) = core.run(fut_msg).unwrap();
 
+        assert_eq!(address,0x12345678);
+        assert_eq!(&message[0..length], orig_message);
     }
 }
