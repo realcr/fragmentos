@@ -5,6 +5,8 @@ authors = ["real"]
 
 [dependencies]
 
+rand = "0.3.16"
+
 arrayref = "0.3.4"
 rust-crypto = "0.2.36"
 reed-solomon = "0.1.6"
