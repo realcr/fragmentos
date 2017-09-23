@@ -1,4 +1,3 @@
-
 extern crate futures;
 extern crate rand;
 
@@ -104,7 +103,6 @@ mod tests {
             let send_msg_fut = fms.send_msg(orig_message,ADDRESS);
 
             let mut core = Core::new().unwrap();
-           
             let (_fms, _orig_message) = core.run(send_msg_fut).unwrap();
         }
 
@@ -122,7 +120,6 @@ mod tests {
         // Take the last fragment (From the end):
         let united = fsm.received_frag_message(&sent_messages[sent_messages.len() - 1], cur_inst).unwrap();
         assert_eq!(united, orig_message);
-
     }
 }
 
