@@ -22,43 +22,6 @@ where
     phantom_a: PhantomData<A>,
 }
 
-struct SendMsg<A,R,F,S,B,G>
-where
-    A: Copy,
-    R: Rng,
-    F: Future<Item=Vec<u8>, Error=io::Error>,
-    S: FnMut(Vec<u8>, A) -> F,
-    B: AsRef<[u8]>,
-    G: Future<Item=(FragMsgSender<A,R,F,S>,B), Error=io::Error>,
-{
-    inner_fut: G,
-    /* 
-    phantom_a: PhantomData<A>,
-    phantom_r: PhantomData<R>,
-    phantom_f: PhantomData<F>,
-    phantom_s: PhantomData<S>,
-    phantom_b: PhantomData<B>,
-    */
-}
-
-
-impl<A,R,F,S,B,G> Future for SendMsg<A,R,F,S,B,G>
-where
-    A: Copy,
-    R: Rng,
-    F: Future<Item=Vec<u8>, Error=io::Error>,
-    S: FnMut(Vec<u8>, A) -> F,
-    B: AsRef<[u8]>,
-    G: Future<Item=(FragMsgSender<A,R,F,S>,B), Error=io::Error>,
-{
-    type Item = (FragMsgSender<A,R,F,S>, B);
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, io::Error> {
-        self.inner_fut.poll()
-    }
-}
-
 
 impl<A,R,F,S> FragMsgSender<A,R,F,S> 
 where
@@ -76,7 +39,7 @@ where
         }
     }
 
-    fn send_msg<B>(self, send_buff: B, address: A) -> impl Future<Item=(FragMsgSender<A,R,F,S>,B), Error=io::Error>
+    fn send_msg<B>(mut self, send_buff: B, address: A) -> impl Future<Item=(FragMsgSender<A,R,F,S>,B), Error=io::Error>
     where
         B: AsRef<[u8]>,
     {
@@ -91,17 +54,16 @@ where
             Ok(datagrams) => datagrams
         };
 
-
-        let send_all_fut = future::join_all(
-            datagrams.into_iter()
+        // I do this collect because of a possible bug with `impl trait`.
+        // Maybe in future rust versions the statements could be chained together
+        // without collecting in the middle.
+        let send_futures = datagrams.into_iter()
             .map(|dgram| (self.send_dgram)(dgram, address))
-        ).and_then(|_| {
+            .collect::<Vec<F>>();
+
+        future::join_all(send_futures)
+        .and_then(|_| {
             Ok((self, send_buff))
-        });
-
-        SendMsg {
-            inner_fut: send_all_fut,
-        }
+        })
     }
-
 }
