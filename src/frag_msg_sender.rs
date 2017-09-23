@@ -4,7 +4,7 @@ extern crate rand;
 use std::io;
 use std::collections::VecDeque;
 
-use self::futures::{Sink, Poll, StartSend, AsyncSink, Async};
+use self::futures::{Sink, Poll, StartSend, AsyncSink};
 use self::rand::Rng;
 
 use ::messages::{split_message, NONCE_LEN};
