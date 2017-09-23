@@ -4,7 +4,7 @@ extern crate rand;
 use std::io;
 use std::collections::VecDeque;
 
-use self::futures::{Sink, Poll, StartSend, AsyncSink};
+use self::futures::{Sink, Poll, StartSend, AsyncSink, Async};
 use self::rand::Rng;
 
 use ::messages::{split_message, NONCE_LEN};
@@ -120,46 +120,75 @@ mod tests {
 
     use ::state_machine::FragStateMachine;
 
+    struct DummySink<T> {
+        sent: VecDeque<T>,
+    }
+
+    impl<T> DummySink<T> {
+        fn new() -> Self{
+            DummySink {
+                sent: VecDeque::new(),
+            }
+        }
+    }
+
+    impl<T> Sink for DummySink<T> {
+        type SinkItem = T;
+        type SinkError = io::Error;
+
+        fn start_send(&mut self, item: Self::SinkItem) 
+            -> StartSend<Self::SinkItem, Self::SinkError> {
+            self.sent.push_back(item);
+            Ok(AsyncSink::Ready)
+        }
+
+        fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+            Ok(Async::Ready(()))
+        }
+    }
+
+
     #[test]
     fn test_frag_msg_sender_basic() {
-        let orig_message = b"This is some message to be split";
+        let orig_message: Vec<u8> = b"This is some message to be split".to_vec();
+        let orig_message_copy = orig_message.clone();
+
         // A maximum size of underlying datagram:
         const MAX_DGRAM_LEN: usize = 22;
         const ADDRESS: u32 = 0x12345678;
 
-        let mut sent_messages = Vec::new();
-
         let seed: &[_] = &[1,2,3,4,5];
         let rng: StdRng = rand::SeedableRng::from_seed(seed);
+        let send_sink = DummySink::new();
 
-        {
-            let send_dgram = |buff: Vec<u8>, addr| {
-                assert_eq!(addr, ADDRESS);
-                sent_messages.push(buff.clone());
-                future::ok::<_,io::Error>(buff)
-            };
 
-            let fms = FragMsgSender::new(send_dgram, MAX_DGRAM_LEN, rng);
-            let send_msg_fut = fms.send_msg(orig_message,ADDRESS);
+        let fms = FragMsgSender::new(send_sink, MAX_DGRAM_LEN, rng);
+        let send_msg_fut = fms.send((orig_message, ADDRESS));
 
-            let mut core = Core::new().unwrap();
-            let (_fms, _orig_message) = core.run(send_msg_fut).unwrap();
-        }
+        let mut core = Core::new().unwrap();
+        let fms = core.run(send_msg_fut).unwrap();
+
+        let send_sink = fms.into_inner();
 
         // Feed a Fragmentos state machine with the sent messages:
         let mut fsm = FragStateMachine::new();
         let mut cur_inst = Instant::now();
 
-        let b = (sent_messages.len() + 1) / 2;
+        let sent_dgrams = &send_sink.sent;
+
+        let b = (sent_dgrams.len() + 1) / 2;
         for i in 0 .. b - 1 {
-            assert_eq!(fsm.received_frag_message(&sent_messages[i], cur_inst), None);
+            let (ref dgram, _address) = sent_dgrams[i];
+            assert_eq!(fsm.received_frag_message(dgram, cur_inst), None);
             fsm.time_tick(cur_inst);
             cur_inst += Duration::new(0,5);
         }
 
         // Take the last fragment (From the end):
-        let united = fsm.received_frag_message(&sent_messages[sent_messages.len() - 1], cur_inst).unwrap();
-        assert_eq!(united, orig_message);
+        let (ref dgram, _address) = sent_dgrams[sent_dgrams.len() - 1];
+        let united = fsm.received_frag_message(&dgram, cur_inst).unwrap();
+
+        assert_eq!(united, orig_message_copy);
     }
 }
 
