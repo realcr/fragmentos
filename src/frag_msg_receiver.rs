@@ -218,6 +218,9 @@ mod tests {
     #[test]
     fn test_frag_msg_receiver_basic() {
 
+        // A maximum size of underlying datagram:
+        const MAX_DGRAM_LEN: usize = 22;
+
         // Lists of messages, addresses and time instants:
         let mut messages: VecDeque<Vec<u8>> = VecDeque::new();
         let mut addresses: VecDeque<u32> = VecDeque::new();
@@ -225,7 +228,7 @@ mod tests {
 
         let orig_message = b"This is some message to be split";
         let frags = split_message(orig_message, 
-                                  b"nonce123", 22).unwrap();
+                                  b"nonce123", MAX_DGRAM_LEN).unwrap();
         assert!(frags.len() > 1);
         assert!(frags.len() % 2 == 1);
 
@@ -254,8 +257,6 @@ mod tests {
             // Return completed future:
             future::ok::<_,io::Error>((buff, cur_msg.len(), cur_address))
         };
-        // A maximum size of underlying datagram:
-        const MAX_DGRAM_LEN: usize = 512;
 
         // Create a vector that could hold any Fragmentos message:
         let res_vec = vec![0; max_message(MAX_DGRAM_LEN).unwrap()];
