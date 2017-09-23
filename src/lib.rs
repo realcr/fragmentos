@@ -9,8 +9,8 @@ extern crate arrayref;
 mod shares;
 mod messages;
 mod state_machine;
-mod frag_msg_receiver;
-mod frag_msg_sender;
+pub mod frag_msg_receiver;
+pub mod frag_msg_sender;
 
 #[cfg(test)]
 mod tests {
