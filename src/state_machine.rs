@@ -287,8 +287,8 @@ mod tests {
         let b = (frags.len() + 1) / 2;
         for i in 0 .. b - 1 {
             assert_eq!(fsm.received_frag_message(&frags[i], cur_inst), None);
-            cur_inst += Duration::new(MESSAGE_ID_TIMEOUT - 1,0);
             fsm.time_tick(cur_inst);
+            cur_inst += Duration::new(MESSAGE_ID_TIMEOUT - 1,0);
         }
 
         // Frag b is ignored, because after about the second frag sent the cur_message entry was
