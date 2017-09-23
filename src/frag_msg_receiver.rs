@@ -10,14 +10,28 @@ use self::futures::{Future, Poll, Async};
 use ::state_machine::{FragStateMachine};
 use ::messages::max_message;
 
-pub struct FragMsgReceiver<A,R,Q,F>
-where 
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
-    R: FnMut(Vec<u8>) -> F,
+trait Dgramer<A>
+where
+    Self: Sized,
+{
+    fn recv_dgram<T,F>(self, T) -> F
+    where 
+        T: AsMut<[u8]>,
+        F: Future<Item=(Self, T, usize, A), Error=io::Error>;
+
+    fn send_dgram<T,F>(self, T) -> F 
+    where 
+        T: AsRef<[u8]>,
+        F: Future<Item=(Self, T), Error=io::Error>;
+}
+
+struct FragMessenger<A,D,Q> 
+where
+    D: Dgramer<A>,
     Q: FnMut() -> Instant,
 {
+    dgramer: D,
     frag_state_machine: FragStateMachine,
-    recv_dgram: R,
     get_cur_instant: Q,
     max_dgram_len: usize,
     phantom_a: PhantomData<A>,
@@ -32,50 +46,50 @@ where
     ReadFuture(F),
 }
 
-struct ReadingState<B,A,R,Q,F> 
+struct ReadingState<A,D,Q,B,F>
 where 
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
-    R: FnMut(Vec<u8>) -> F,
+    D: Dgramer<A>,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
 {
-    frag_msg_receiver: FragMsgReceiver<A,R,Q,F>,
+    frag_messenger: FragMessenger<A,D,Q>,
     res_buff: B,
     reading_buff: ReadingBuff<A,F>,
 }
 
-enum RecvState<B,A,R,Q,F>
+enum RecvState<A,D,Q,B,F>
 where 
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
-    R: FnMut(Vec<u8>) -> F,
+    D: Dgramer<A>,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
 {
-    Reading(ReadingState<B,A,R,Q,F>),
+    Reading(ReadingState<A,D,Q,B,F>),
     Done,
 }
 
-pub struct RecvMsg<B,A,R,Q,F>
+pub struct RecvMsg<A,D,Q,B,F>
 where 
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
-    R: FnMut(Vec<u8>) -> F,
+    D: Dgramer<A>,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
 {
-    state: RecvState<B,A,R,Q,F>,
+    state: RecvState<A,D,Q,B,F>,
 }
 
 
-impl<B,A,R,Q,F> Future for RecvMsg<B,A,R,Q,F>
+impl<A,D,Q,B,F> Future for RecvMsg<A,D,Q,B,F>
 where 
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
-    R: FnMut(Vec<u8>) -> F,
+    D: Dgramer<A>,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
+    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
 {
 
     // FragMsgReceiver, buffer, num_bytes, address
-    type Item = (FragMsgReceiver<A,R,Q,F>, (B, usize, A));
+    type Item = (FragMessenger<A,D,Q>, (B, usize, A));
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, io::Error> {
@@ -94,7 +108,7 @@ where
 
                     ReadingBuff::Empty => panic!("Invalid state for reading_buff."),
                     ReadingBuff::TempBuff(temp_buff) =>
-                        (reading_state.frag_msg_receiver.recv_dgram)(
+                        reading_state.frag_messenger.dgramer.recv_dgram(
                             temp_buff),
                     ReadingBuff::ReadFuture(fdgram) => fdgram,
                 };
@@ -165,25 +179,25 @@ where
 }
 
 
-impl<A,R,Q,F> FragMsgReceiver<A,R,Q,F>
+impl<A,D,Q> FragMessenger<A,D,Q>
 where
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
-    R: FnMut(Vec<u8>) -> F,
+    D: Dgramer<A>,
     Q: FnMut() -> Instant,
 {
-    pub fn new(get_cur_instant: Q, recv_dgram: R, max_dgram_len: usize) -> Self {
-        FragMsgReceiver {
+    pub fn new(dgramer: D, get_cur_instant: Q, max_dgram_len: usize) -> Self {
+        FragMessenger {
+            dgramer,
             frag_state_machine: FragStateMachine::new(),
-            recv_dgram,
             get_cur_instant,
             max_dgram_len,
             phantom_a: PhantomData,
         }
     }
 
-    pub fn recv_msg<B>(self, mut res_buff: B) -> RecvMsg<B,A,R,Q,F> 
+    pub fn recv_msg<B,F>(self, mut res_buff: B) -> RecvMsg<A,D,Q,B,F> 
     where
         B: AsMut<[u8]>,
+        F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
     {
         let max_dgram_len = self.max_dgram_len;
         if res_buff.as_mut().len() < max_message(max_dgram_len).unwrap() {
@@ -193,7 +207,7 @@ where
         RecvMsg {
             state: RecvState::Reading(
                 ReadingState {
-                    frag_msg_receiver: self,
+                    frag_messenger: self,
                     res_buff,
                     reading_buff: ReadingBuff::TempBuff(vec![0; max_dgram_len]),
                 }
