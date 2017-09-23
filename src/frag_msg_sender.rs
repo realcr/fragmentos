@@ -39,6 +39,10 @@ where
             opt_pending_dgrams: None,
         }
     }
+
+    pub fn into_inner(self) -> S {
+        self.send_sink
+    }
 }
 
 impl<A,R,S> Sink for FragMsgSender<A,R,S>
