@@ -293,6 +293,6 @@ mod tests {
 
         // Frag b is ignored, because after about the second frag sent the cur_message entry was
         // removed, and message id was moved to used_message_ids.
-        assert_eq!(fsm.received_frag_message(&frags[frags.len() - 1], cur_inst), None);;
+        assert_eq!(fsm.received_frag_message(&frags[frags.len() - 1], cur_inst), None);
     }
 }
