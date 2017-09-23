@@ -37,9 +37,10 @@ where
     phantom_a: PhantomData<A>,
 }
 
-enum ReadingBuff<A,F> 
+enum ReadingBuff<A,D,F> 
 where
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    D: Dgramer<A>,
+    F: Future<Item=(D,Vec<u8>, usize, A), Error=io::Error>,
 {
     Empty,
     TempBuff(Vec<u8>),
@@ -51,11 +52,11 @@ where
     D: Dgramer<A>,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    F: Future<Item=(D, Vec<u8>, usize, A), Error=io::Error>,
 {
     frag_messenger: FragMessenger<A,D,Q>,
     res_buff: B,
-    reading_buff: ReadingBuff<A,F>,
+    reading_buff: ReadingBuff<A,D,F>,
 }
 
 enum RecvState<A,D,Q,B,F>
@@ -63,7 +64,7 @@ where
     D: Dgramer<A>,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    F: Future<Item=(D, Vec<u8>, usize, A), Error=io::Error>,
 {
     Reading(ReadingState<A,D,Q,B,F>),
     Done,
@@ -74,7 +75,7 @@ where
     D: Dgramer<A>,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    F: Future<Item=(D,Vec<u8>, usize, A), Error=io::Error>,
 {
     state: RecvState<A,D,Q,B,F>,
 }
@@ -85,7 +86,7 @@ where
     D: Dgramer<A>,
     Q: FnMut() -> Instant,
     B: AsMut<[u8]>,
-    F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+    F: Future<Item=(D,Vec<u8>, usize, A), Error=io::Error>,
 {
 
     // FragMsgReceiver, buffer, num_bytes, address
@@ -108,8 +109,8 @@ where
 
                     ReadingBuff::Empty => panic!("Invalid state for reading_buff."),
                     ReadingBuff::TempBuff(temp_buff) =>
-                        reading_state.frag_messenger.dgramer.recv_dgram(
-                            temp_buff),
+                        reading_state.frag_messenger.dgramer.recv_dgram(temp_buff),
+
                     ReadingBuff::ReadFuture(fdgram) => fdgram,
                 };
 
@@ -197,7 +198,7 @@ where
     pub fn recv_msg<B,F>(self, mut res_buff: B) -> RecvMsg<A,D,Q,B,F> 
     where
         B: AsMut<[u8]>,
-        F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
+        F: Future<Item=(D,Vec<u8>, usize, A), Error=io::Error>,
     {
         let max_dgram_len = self.max_dgram_len;
         if res_buff.as_mut().len() < max_message(max_dgram_len).unwrap() {
