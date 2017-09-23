@@ -55,7 +55,7 @@ where
     Done,
 }
 
-struct RecvMsg<B,A,R,Q,F>
+pub struct RecvMsg<B,A,R,Q,F>
 where 
     F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
     R: FnMut(Vec<u8>) -> F,
