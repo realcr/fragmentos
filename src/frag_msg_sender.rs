@@ -5,7 +5,7 @@ extern crate rand;
 use std::io;
 use std::marker::PhantomData;
 
-use self::futures::{Future, Poll, Async, future};
+use self::futures::{Future, future};
 use self::rand::Rng;
 
 use ::messages::{split_message, NONCE_LEN};
