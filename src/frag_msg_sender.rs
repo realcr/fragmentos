@@ -2,69 +2,105 @@ extern crate futures;
 extern crate rand;
 
 use std::io;
-use std::marker::PhantomData;
+use std::collections::VecDeque;
 
-use self::futures::{Future, future};
+use self::futures::{Sink, Poll, StartSend, AsyncSink};
 use self::rand::Rng;
 
 use ::messages::{split_message, NONCE_LEN};
 
-pub struct FragMsgSender<A,R,F,S> 
+struct PendingDgrams<A> {
+    address: A,
+    dgrams: VecDeque<Vec<u8>>,
+}
+
+pub struct FragMsgSender<A,R,S> 
 where
     R: Rng,
-    F: Future<Item=Vec<u8>, Error=io::Error>,
-    S: FnMut(Vec<u8>, A) -> F,
+    S: Sink<SinkItem=(Vec<u8>, A), SinkError=io::Error>,
 {
-    send_dgram: S,
+    send_sink: S,
     max_dgram_len: usize,
     rng: R,
-    phantom_a: PhantomData<A>,
+    opt_pending_dgrams: Option<PendingDgrams<A>>,
 }
 
 
-impl<A,R,F,S> FragMsgSender<A,R,F,S> 
+impl<A,R,S> FragMsgSender<A,R,S> 
+where
+    R: Rng,
+    S: Sink<SinkItem=(Vec<u8>, A), SinkError=io::Error>,
+{
+    pub fn new(send_sink: S, max_dgram_len: usize, rng: R) -> Self {
+        FragMsgSender {
+            send_sink,
+            max_dgram_len,
+            rng,
+            opt_pending_dgrams: None,
+        }
+    }
+}
+
+impl<A,R,S> Sink for FragMsgSender<A,R,S>
 where
     A: Copy,
     R: Rng,
-    F: Future<Item=(Vec<u8>), Error=io::Error>,
-    S: FnMut(Vec<u8>, A) -> F,
+    S: Sink<SinkItem=(Vec<u8>, A), SinkError=io::Error>,
 {
-    pub fn new(send_dgram: S, max_dgram_len: usize, rng: R) -> Self {
-        FragMsgSender {
-            send_dgram,
-            max_dgram_len,
-            rng,
-            phantom_a: PhantomData,
-        }
-    }
+    type SinkItem = (Vec<u8>, A);
+    type SinkError = io::Error;
 
-    pub fn send_msg<B>(mut self, send_buff: B, address: A) -> impl Future<Item=(FragMsgSender<A,R,F,S>,B), Error=io::Error>
-    where
-        B: AsRef<[u8]>,
-    {
-        // Generate a random nonce:
-        let nonce: &mut [u8; NONCE_LEN] = &mut [0; NONCE_LEN];
-        self.rng.fill_bytes(nonce);
-        
-        let datagrams = match split_message(
-            send_buff.as_ref(), nonce, self.max_dgram_len) {
+    fn start_send(&mut self, item: Self::SinkItem) 
+        -> StartSend<Self::SinkItem, Self::SinkError> {
 
-            Err(_) => panic!("Failed splitting message!"),
-            Ok(datagrams) => datagrams
+        let (msg, address) = item;
+        match self.opt_pending_dgrams.take() {
+            Some(pending_dgrams) => self.opt_pending_dgrams = Some(pending_dgrams),
+            None => {
+                // Generate a random nonce:
+                let nonce: &mut [u8; NONCE_LEN] = &mut [0; NONCE_LEN];
+                self.rng.fill_bytes(nonce);
+
+                let dgrams = match split_message(
+                        msg.as_ref(), nonce, self.max_dgram_len) {
+
+                    Ok(dgrams) => dgrams,
+                    Err(_) => panic!("Failed to split message!"),
+                }.into_iter().collect::<VecDeque<_>>(); 
+
+                self.opt_pending_dgrams = Some(PendingDgrams {
+                    address,
+                    dgrams,
+                });
+            }
         };
 
-        // I do this collect because of a possible bug with `impl trait`.
-        // Maybe in future rust versions the statements could be chained together
-        // without collecting in the middle.
-        let send_futures = datagrams.into_iter()
-            .map(|dgram| (self.send_dgram)(dgram, address))
-            .collect::<Vec<F>>();
+        // Send all possible datagrams:
+        let mut pending_dgrams = match self.opt_pending_dgrams {
+            None => panic!("Invalid state!"),
+            Some(ref mut pending_dgrams) => pending_dgrams,
+        };
 
-        future::join_all(send_futures)
-        .and_then(|_| {
-            Ok((self, send_buff))
-        })
+        while let Some(dgram) = pending_dgrams.dgrams.pop_front() {
+            match self.send_sink.start_send(
+                (dgram, pending_dgrams.address)) {
+
+                Ok(AsyncSink::Ready) => {},
+                Ok(AsyncSink::NotReady((dgram, _))) => {
+                    pending_dgrams.dgrams.push_front(dgram);
+                    return Ok(AsyncSink::NotReady((msg, address)));
+                }
+                Err(e) => return Err(e),
+
+            }
+        }
+        Ok(AsyncSink::Ready)
     }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        self.send_sink.poll_complete()
+    }
+
 }
 
 
