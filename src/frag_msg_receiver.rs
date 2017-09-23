@@ -181,7 +181,7 @@ where
         }
     }
 
-    pub fn recv_msg<B>(self, mut res_buff: B ) -> RecvMsg<B,A,R,Q,F> 
+    pub fn recv_msg<B>(self, mut res_buff: B) -> RecvMsg<B,A,R,Q,F> 
     where
         B: AsMut<[u8]>,
     {
