@@ -1,11 +1,10 @@
 extern crate futures;
 
 use std::io;
-use std::mem;
 use std::time::Instant;
 use std::marker::PhantomData;
 
-use self::futures::{Stream, Future, Poll, Async};
+use self::futures::{Stream, Poll, Async};
 
 use ::state_machine::{FragStateMachine};
 
@@ -98,7 +97,7 @@ mod tests {
     use super::*;
     use std::time::{Instant, Duration};
     use std::collections::VecDeque;
-    use self::futures::future;
+    use self::futures::{stream, Future};
     use self::tokio_core::reactor::Core;
 
     use ::messages::{split_message};
@@ -108,10 +107,10 @@ mod tests {
 
         // A maximum size of underlying datagram:
         const MAX_DGRAM_LEN: usize = 22;
+        const ADDRESS: u32 = 0x12345678;
 
         // Lists of messages, addresses and time instants:
-        let mut messages: VecDeque<Vec<u8>> = VecDeque::new();
-        let mut addresses: VecDeque<u32> = VecDeque::new();
+        let mut items = VecDeque::new();
         let mut instants: VecDeque<Instant> = VecDeque::new();
 
         let orig_message = b"This is some message to be split";
@@ -124,8 +123,7 @@ mod tests {
         let mut cur_instant = Instant::now();
 
         for frag in frags.into_iter().take(b) {
-            messages.push_back(frag);
-            addresses.push_back(0x12345678);
+            items.push_back((frag, ADDRESS));
             instants.push_back(cur_instant);
 
             // Add a small time duration between the receipt 
@@ -134,28 +132,17 @@ mod tests {
         }
 
         let get_cur_instant = || instants.pop_front().unwrap();
-        let recv_dgram = |mut buff: Vec<u8>| {
-            let cur_msg = messages.pop_front().unwrap();
-            let cur_address = addresses.pop_front().unwrap();
-            if cur_msg.len() > buff.len() {
-                panic!("Message too large for buffer!");
-            }
-            // Copy message into buffer:
-            buff[0 .. cur_msg.len()].copy_from_slice(&cur_msg);
-            // Return completed future:
-            future::ok::<_,io::Error>((buff, cur_msg.len(), cur_address))
-        };
+        let recv_stream = stream::iter_ok(items);
 
-        // Create a vector that could hold any Fragmentos message:
-        let res_vec = vec![0; max_message(MAX_DGRAM_LEN).unwrap()];
-
-        let fmr = FragMsgReceiver::new(get_cur_instant, recv_dgram, MAX_DGRAM_LEN);
-        let fut_msg = fmr.recv_msg(res_vec);
+        let fmr = FragMsgReceiver::new(recv_stream, get_cur_instant);
+        let fut_msg = fmr.into_future().map_err(|(e,_)| e);
 
         let mut core = Core::new().unwrap();
-        let (_fmr, (message, length, address)) = core.run(fut_msg).unwrap();
+        let (opt_elem, _fmr) = core.run(fut_msg).unwrap();
 
-        assert_eq!(address,0x12345678);
-        assert_eq!(&message[0..length], orig_message);
+        let (message, address) = opt_elem.unwrap();
+
+        assert_eq!(address, ADDRESS);
+        assert_eq!(message, orig_message);
     }
 }
