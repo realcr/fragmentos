@@ -10,7 +10,7 @@ use self::futures::{Future, Poll, Async};
 use ::state_machine::{FragStateMachine};
 use ::messages::max_message;
 
-struct FragMsgReceiver<A,R,Q,F>
+pub struct FragMsgReceiver<A,R,Q,F>
 where 
     F: Future<Item=(Vec<u8>, usize, A), Error=io::Error>,
     R: FnMut(Vec<u8>) -> F,

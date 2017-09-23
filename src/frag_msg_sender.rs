@@ -10,7 +10,7 @@ use self::rand::Rng;
 
 use ::messages::{split_message, NONCE_LEN};
 
-struct FragMsgSender<A,R,F,S> 
+pub struct FragMsgSender<A,R,F,S> 
 where
     R: Rng,
     F: Future<Item=Vec<u8>, Error=io::Error>,
@@ -30,7 +30,7 @@ where
     F: Future<Item=(Vec<u8>), Error=io::Error>,
     S: FnMut(Vec<u8>, A) -> F,
 {
-    fn new(send_dgram: S, max_dgram_len: usize, rng: R) -> Self {
+    pub fn new(send_dgram: S, max_dgram_len: usize, rng: R) -> Self {
         FragMsgSender {
             send_dgram,
             max_dgram_len,
@@ -39,7 +39,7 @@ where
         }
     }
 
-    fn send_msg<B>(mut self, send_buff: B, address: A) -> impl Future<Item=(FragMsgSender<A,R,F,S>,B), Error=io::Error>
+    pub fn send_msg<B>(mut self, send_buff: B, address: A) -> impl Future<Item=(FragMsgSender<A,R,F,S>,B), Error=io::Error>
     where
         B: AsRef<[u8]>,
     {
