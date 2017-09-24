@@ -4,7 +4,7 @@ extern crate rand;
 use std::io;
 use std::collections::VecDeque;
 
-use self::futures::{Sink, Poll, StartSend, AsyncSink};
+use self::futures::{Sink, Poll, StartSend, AsyncSink, Async};
 use self::rand::Rng;
 
 use ::messages::{split_message, NONCE_LEN};
@@ -80,7 +80,7 @@ where
         };
 
         // Send all possible datagrams:
-        let mut pending_dgrams = match self.opt_pending_dgrams {
+        let pending_dgrams = match self.opt_pending_dgrams {
             None => panic!("Invalid state!"),
             Some(ref mut pending_dgrams) => pending_dgrams,
         };
