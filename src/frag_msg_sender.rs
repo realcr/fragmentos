@@ -3,7 +3,7 @@ extern crate rand;
 
 use std::collections::VecDeque;
 
-use self::futures::{Sink, Poll, StartSend, AsyncSink, Async};
+use self::futures::{Sink, Poll, StartSend, AsyncSink};
 use self::rand::Rng;
 
 use ::messages::{split_message, NONCE_LEN};
@@ -120,6 +120,7 @@ mod tests {
 
     use self::rand::{StdRng, Rng};
     use self::tokio_core::reactor::Core;
+    use self::futures::Async;
 
     use ::state_machine::FragStateMachine;
 
