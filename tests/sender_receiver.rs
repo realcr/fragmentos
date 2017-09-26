@@ -62,7 +62,6 @@ fn basic_test_sender_receiver() {
 
         let keep_messages = frag_receiver.for_each(|(message, address)| {
             incoming_messages.push((message, address));
-            println!("Received message!");
             Ok(())
         });
 
