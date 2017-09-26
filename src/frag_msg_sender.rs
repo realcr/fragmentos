@@ -58,6 +58,7 @@ where
         -> StartSend<Self::SinkItem, Self::SinkError> {
 
         let (msg, address) = item;
+
         match self.opt_pending_dgrams.take() {
             Some(pending_dgrams) => self.opt_pending_dgrams = Some(pending_dgrams),
             None => {
@@ -79,25 +80,28 @@ where
             }
         };
 
-        // Send all possible datagrams:
-        let pending_dgrams = match self.opt_pending_dgrams {
-            None => panic!("Invalid state!"),
-            Some(ref mut pending_dgrams) => pending_dgrams,
-        };
+        {
+            // Send all possible datagrams:
+            let pending_dgrams = match self.opt_pending_dgrams {
+                None => panic!("Invalid state!"),
+                Some(ref mut pending_dgrams) => pending_dgrams,
+            };
 
-        while let Some(dgram) = pending_dgrams.dgrams.pop_front() {
-            match self.send_sink.start_send(
-                (dgram, pending_dgrams.address)) {
+            while let Some(dgram) = pending_dgrams.dgrams.pop_front() {
+                match self.send_sink.start_send(
+                    (dgram, pending_dgrams.address)) {
 
-                Ok(AsyncSink::Ready) => {},
-                Ok(AsyncSink::NotReady((dgram, _))) => {
-                    pending_dgrams.dgrams.push_front(dgram);
-                    return Ok(AsyncSink::NotReady((msg, address)));
+                    Ok(AsyncSink::Ready) => {},
+                    Ok(AsyncSink::NotReady((dgram, _))) => {
+                        pending_dgrams.dgrams.push_front(dgram);
+                        return Ok(AsyncSink::NotReady((msg, address)));
+                    }
+                    Err(e) => return Err(e),
+
                 }
-                Err(e) => return Err(e),
-
             }
         }
+        self.opt_pending_dgrams = None;
         Ok(AsyncSink::Ready)
     }
 
