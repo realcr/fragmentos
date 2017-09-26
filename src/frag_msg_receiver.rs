@@ -1,6 +1,5 @@
 extern crate futures;
 
-use std::io;
 use std::time::Instant;
 use std::marker::PhantomData;
 

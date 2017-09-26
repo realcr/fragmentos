@@ -1,7 +1,6 @@
 extern crate futures;
 extern crate rand;
 
-use std::io;
 use std::collections::VecDeque;
 
 use self::futures::{Sink, Poll, StartSend, AsyncSink, Async};
