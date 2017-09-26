@@ -44,7 +44,7 @@ where
     type Item = (Vec<u8>, A);
     type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
 
         let total_msg: Vec<u8>;
         let last_address: A;
