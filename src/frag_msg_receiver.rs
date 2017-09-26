@@ -8,9 +8,9 @@ use self::futures::{Stream, Poll, Async};
 
 use ::state_machine::{FragStateMachine};
 
-pub struct FragMsgReceiver<A,R,Q>
+pub struct FragMsgReceiver<A,R,Q,E>
 where 
-    R: Stream<Item=(Vec<u8>, A), Error=io::Error>,
+    R: Stream<Item=(Vec<u8>, A), Error=E>,
     Q: FnMut() -> Instant,
 {
     frag_state_machine: FragStateMachine,
@@ -20,9 +20,9 @@ where
 }
 
 
-impl<A,R,Q> FragMsgReceiver<A,R,Q>
+impl<A,R,Q,E> FragMsgReceiver<A,R,Q,E>
 where
-    R: Stream<Item=(Vec<u8>, A), Error=io::Error>,
+    R: Stream<Item=(Vec<u8>, A), Error=E>,
     Q: FnMut() -> Instant,
 {
     pub fn new(recv_stream: R, get_cur_instant: Q) -> Self {
@@ -36,13 +36,13 @@ where
 }
 
 
-impl<A,R,Q> Stream for FragMsgReceiver<A,R,Q>
+impl<A,R,Q,E> Stream for FragMsgReceiver<A,R,Q,E>
 where 
-    R: Stream<Item=(Vec<u8>, A), Error=io::Error>,
+    R: Stream<Item=(Vec<u8>, A), Error=E>,
     Q: FnMut() -> Instant,
 {
     type Item = (Vec<u8>, A);
-    type Error = io::Error;
+    type Error = E;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
 
@@ -135,7 +135,7 @@ mod tests {
         let recv_stream = stream::iter_ok(items);
 
         let fmr = FragMsgReceiver::new(recv_stream, get_cur_instant);
-        let fut_msg = fmr.into_future().map_err(|(e,_)| e);
+        let fut_msg = fmr.into_future().map_err(|(e,_):((),_)| e);
 
         let mut core = Core::new().unwrap();
         let (opt_elem, _fmr) = core.run(fut_msg).unwrap();
