@@ -14,10 +14,10 @@ struct PendingDgrams<A> {
     dgrams: VecDeque<Vec<u8>>,
 }
 
-pub struct FragMsgSender<A,R,S> 
+pub struct FragMsgSender<A,R,S,E> 
 where
     R: Rng,
-    S: Sink<SinkItem=(Vec<u8>, A), SinkError=io::Error>,
+    S: Sink<SinkItem=(Vec<u8>, A), SinkError=E>,
 {
     send_sink: S,
     max_dgram_len: usize,
@@ -26,10 +26,10 @@ where
 }
 
 
-impl<A,R,S> FragMsgSender<A,R,S> 
+impl<A,R,S,E> FragMsgSender<A,R,S,E> 
 where
     R: Rng,
-    S: Sink<SinkItem=(Vec<u8>, A), SinkError=io::Error>,
+    S: Sink<SinkItem=(Vec<u8>, A), SinkError=E>,
 {
     pub fn new(send_sink: S, max_dgram_len: usize, rng: R) -> Self {
         FragMsgSender {
@@ -45,14 +45,14 @@ where
     }
 }
 
-impl<A,R,S> Sink for FragMsgSender<A,R,S>
+impl<A,R,S,E> Sink for FragMsgSender<A,R,S,E>
 where
     A: Copy,
     R: Rng,
-    S: Sink<SinkItem=(Vec<u8>, A), SinkError=io::Error>,
+    S: Sink<SinkItem=(Vec<u8>, A), SinkError=E>,
 {
     type SinkItem = (Vec<u8>, A);
-    type SinkError = io::Error;
+    type SinkError = E;
 
     fn start_send(&mut self, item: Self::SinkItem) 
         -> StartSend<Self::SinkItem, Self::SinkError> {
@@ -134,7 +134,7 @@ mod tests {
 
     impl<T> Sink for DummySink<T> {
         type SinkItem = T;
-        type SinkError = io::Error;
+        type SinkError = ();
 
         fn start_send(&mut self, item: Self::SinkItem) 
             -> StartSend<Self::SinkItem, Self::SinkError> {
