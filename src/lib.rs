@@ -7,8 +7,14 @@ extern crate arrayref;
 mod shares;
 mod messages;
 mod state_machine;
-pub mod frag_msg_receiver;
-pub mod frag_msg_sender;
+pub mod utils;
+mod frag_msg_receiver;
+mod frag_msg_sender;
+
+
+pub use ::frag_msg_receiver::FragMsgReceiver;
+pub use ::frag_msg_sender::FragMsgSender;
+
 
 #[cfg(test)]
 mod tests {

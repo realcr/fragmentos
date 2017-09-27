@@ -13,8 +13,8 @@ use rand::StdRng;
 use futures::{stream, Future, Stream, Sink, Poll, StartSend, AsyncSink, Async};
 use futures::task::Task;
 
-use fragmentos::frag_msg_receiver::FragMsgReceiver;
-use fragmentos::frag_msg_sender::FragMsgSender;
+use fragmentos::FragMsgReceiver;
+use fragmentos::FragMsgSender;
 
 use self::tokio_core::reactor::Core;
 
