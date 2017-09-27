@@ -21,13 +21,11 @@ use futures::future;
 use tokio_core::net::{UdpSocket};
 use tokio_core::reactor::Core;
 
-use fragmentos::FragMsgReceiver;
-use fragmentos::FragMsgSender;
+use fragmentos::{FragMsgReceiver, FragMsgSender, max_supported_dgram_len, max_message};
 use fragmentos::utils::DgramCodec;
 
-
-// Maximum size of UDP datagram we are willing to send.
-const MAX_DGRAM_LEN: usize = 512;
+/// Maximum size of UDP datagram we are willing to send.
+const UDP_MAX_DGRAM: usize = 512;
 
 // Maximum message size we are going to send using Fragmentos
 const MAX_FRAG_MSG_LEN: usize = 1000;
@@ -86,7 +84,7 @@ fn get_msg_id(msg: &[u8]) -> Option<u64> {
     }
 }
 
-fn gen_msg_with_id<R: Rng>(mut msg_id: u64, rng: &mut R) -> Vec<u8> {
+fn gen_msg_with_id<R: Rng>(mut msg_id: u64, max_frag_msg_len: usize, rng: &mut R) -> Vec<u8> {
 
     let mut msg = Vec::new();
     for _ in 0 .. 8 {
@@ -94,7 +92,7 @@ fn gen_msg_with_id<R: Rng>(mut msg_id: u64, rng: &mut R) -> Vec<u8> {
         msg_id >>= 8;
     }
 
-    let num_bytes_range: Range<usize> = Range::new(0, MAX_FRAG_MSG_LEN - 8);
+    let num_bytes_range: Range<usize> = Range::new(0, max_frag_msg_len - 8);
     let num_bytes = num_bytes_range.ind_sample(rng);
     for _ in 0 .. num_bytes {
         msg.push(rng.gen());
@@ -107,6 +105,7 @@ struct MsgStream<R> {
     num_messages: u64,
     server_addr: SocketAddr,
     rng: R,
+    max_frag_msg_len: usize,
 }
 
 impl<R> Stream for MsgStream<R> 
@@ -120,7 +119,7 @@ where
         if self.cur_id == self.num_messages {
             Ok(Async::Ready(None))
         } else {
-            let msg = gen_msg_with_id(self.cur_id, &mut self.rng);
+            let msg = gen_msg_with_id(self.cur_id, self.max_frag_msg_len, &mut self.rng);
             self.cur_id += 1;
             Ok(Async::Ready(Some((msg, self.server_addr.clone()))))
         }
@@ -130,8 +129,13 @@ where
 
 fn main() {
 
+    let max_dgram_len = std::cmp::min(max_supported_dgram_len(), UDP_MAX_DGRAM);
     if MAX_FRAG_MSG_LEN < 8 {
         panic!("MAX_FRAG_MSG_LEN is lower than 8!");
+    }
+
+    if MAX_FRAG_MSG_LEN > max_message(max_dgram_len).unwrap() {
+        panic!("MAX_FRAG_MSG_LEN is larger than max_dgram_len = {}", max_dgram_len);
     }
 
     let str_server_addr = env::args().nth(1).unwrap();
@@ -151,15 +155,22 @@ fn main() {
     let dgram_codec = DgramCodec;
     let (sink, stream) = socket.framed(dgram_codec).split();
 
+
+    println!("max_message = {}", max_message(max_dgram_len).unwrap());
+
     // let messages = vec![b"hello world!".to_vec(), b"Another hello!".to_vec()];
     let msg_stream = MsgStream {
         cur_id: 0,
         num_messages,
         server_addr,
         rng: rand::thread_rng(),
+        max_frag_msg_len: MAX_FRAG_MSG_LEN, //max_message(max_dgram_len).unwrap(),
     };
 
-    let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, rand::thread_rng());
+
+    let frag_sender = FragMsgSender::new(sink, 
+                                         max_dgram_len, 
+                                         rand::thread_rng());
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
 
     let send_all = frag_sender.send_all(msg_stream)
@@ -195,6 +206,6 @@ fn main() {
     });
 
 
-    let _ = core.run(receiver).unwrap();
+    core.run(receiver).unwrap();
 }
 
