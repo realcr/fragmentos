@@ -1,47 +1,75 @@
 extern crate futures;
+extern crate tokio_core;
 
+use std::io;
 use std::time::Instant;
 use std::marker::PhantomData;
 
-use self::futures::{Stream, Poll, Async};
+use self::futures::{Future, Stream, Sink, Poll, Async};
+use self::futures::sync::mpsc;
+use self::tokio_core::reactor;
 
 use ::state_machine::{FragStateMachine};
 
-pub struct FragMsgReceiver<A,R,Q,E>
+pub enum FragMsgReceiverError<A,E> {
+    IoError(io::Error),
+    OrigStreamError(E),
+    SendError(mpsc::SendError<(Vec<u8>, A)>),
+    OrigStreamPollFailure,
+}
+
+pub struct FragMsgReceiver<A,Q,E>
 where 
-    R: Stream<Item=(Vec<u8>, A), Error=E>,
+    // R: Stream<Item=(Vec<u8>, A), Error=()>,
     Q: FnMut() -> Instant,
 {
     frag_state_machine: FragStateMachine,
-    recv_stream: R,
+    recv_stream: mpsc::Receiver<(Vec<u8>, A)>,
     get_cur_instant: Q,
     phantom_a: PhantomData<A>,
+    phantom_e: PhantomData<E>,
 }
 
+// Size of buffer for keeping tuples of (dgram, address):
+const BUFF_LEN: usize = 0x100;
 
-impl<A,R,Q,E> FragMsgReceiver<A,R,Q,E>
+
+impl<A,Q,E> FragMsgReceiver<A,Q,E>
 where
-    R: Stream<Item=(Vec<u8>, A), Error=E>,
+    A: 'static,
+    // R: Stream<Item=(Vec<u8>, A), Error=()> + 'static,
     Q: FnMut() -> Instant,
 {
-    pub fn new(recv_stream: R, get_cur_instant: Q) -> Self {
+    pub fn new<R: 'static>(handle: reactor::Handle, recv_stream: R, get_cur_instant: Q) -> Self 
+    where
+        R: Stream<Item=(Vec<u8>,A), Error=E>
+    {
+        let (sink, stream) = mpsc::channel::<(Vec<u8>, A)>(BUFF_LEN);
+
+        let sink = sink.sink_map_err(|e| FragMsgReceiverError::SendError(e));
+        let recv_stream = recv_stream.map_err(|e| FragMsgReceiverError::OrigStreamError(e));
+        let fut = sink.send_all(recv_stream);
+
+        handle.spawn(fut.then(|_| Ok(())));
+
         FragMsgReceiver {
             frag_state_machine: FragStateMachine::new(),
-            recv_stream,
+            recv_stream: stream,
             get_cur_instant,
             phantom_a: PhantomData,
+            phantom_e: PhantomData,
         }
     }
 }
 
 
-impl<A,R,Q,E> Stream for FragMsgReceiver<A,R,Q,E>
+impl<A,Q,E> Stream for FragMsgReceiver<A,Q,E>
 where 
-    R: Stream<Item=(Vec<u8>, A), Error=E>,
+    // R: Stream<Item=(Vec<u8>, A), Error=()>,
     Q: FnMut() -> Instant,
 {
     type Item = (Vec<u8>, A);
-    type Error = E;
+    type Error = FragMsgReceiverError<A,E>;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
 
@@ -53,7 +81,7 @@ where
                 Ok(Async::Ready(Some((dgram, address)))) => (dgram, address),
                 Ok(Async::Ready(None)) => return Ok(Async::Ready(None)),
                 Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => return Err(e),
+                Err(()) => return Err(FragMsgReceiverError::OrigStreamPollFailure),
             };
 
             // Obtain current time:
@@ -133,10 +161,12 @@ mod tests {
         let get_cur_instant = || instants.pop_front().unwrap();
         let recv_stream = stream::iter_ok(items);
 
-        let fmr = FragMsgReceiver::new(recv_stream, get_cur_instant);
+        let mut core = Core::new().unwrap();
+        let handle = core.handle();
+
+        let fmr = FragMsgReceiver::new(handle, recv_stream, get_cur_instant);
         let fut_msg = fmr.into_future().map_err(|(e,_):((),_)| e);
 
-        let mut core = Core::new().unwrap();
         let (opt_elem, _fmr) = core.run(fut_msg).unwrap();
 
         let (message, address) = opt_elem.unwrap();

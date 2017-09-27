@@ -41,7 +41,7 @@ fn main() {
     let max_dgram_len = std::cmp::min(max_supported_dgram_len(), UDP_MAX_DGRAM);
 
     let frag_sender = FragMsgSender::new(sink, max_dgram_len, rand::thread_rng());
-    let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
+    let frag_receiver = FragMsgReceiver::new(handle.clone(), stream, get_cur_instant);
 
     let frag_receiver = frag_receiver.map(|x| {
         println!("Received a Fragmentos message.");

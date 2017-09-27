@@ -24,6 +24,9 @@ const MAX_DGRAM_LEN: usize = 22;
 
 #[test]
 fn basic_test_sender_receiver() {
+    let mut core = Core::new().unwrap();
+    let handle = core.handle();
+
     let seed: &[_] = &[1,2,3,4,5];
     let rng: StdRng = rand::SeedableRng::from_seed(seed);
 
@@ -34,7 +37,7 @@ fn basic_test_sender_receiver() {
     let (sink, stream) = mpsc::channel::<(Vec<u8>, u32)>(0);
 
     let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, rng);
-    let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
+    let frag_receiver = FragMsgReceiver::new(handle.clone(), stream, get_cur_instant);
 
     let messages: Vec<(Vec<u8>, u32)> = vec![
         (b"How are you today?".to_vec(), 0x12345678),
@@ -54,8 +57,6 @@ fn basic_test_sender_receiver() {
     let mut incoming_messages = Vec::new();
 
     {
-        let mut core = Core::new().unwrap();
-        let handle = core.handle();
 
         // Start a task to send all of our messages:
         handle.spawn(send_all.then(|_| Ok(())));
