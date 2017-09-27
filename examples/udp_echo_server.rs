@@ -1,69 +1,49 @@
-#![feature(conservative_impl_trait)]
-
+extern crate rand;
 extern crate futures;
 extern crate tokio_core;
 
 extern crate fragmentos;
 
 use std::net::SocketAddr;
-use std::{env, io};
+use std::{env};
 use std::time::Instant;
 
-use futures::Future;
+use futures::{Stream, Sink};
 
-use tokio_core::net::UdpSocket;
+use tokio_core::net::{UdpSocket};
 use tokio_core::reactor::Core;
 
-use fragmentos::frag_msg_receiver::FragMsgReceiver;
-use fragmentos::frag_msg_sender::FragMsgSender;
+use fragmentos::FragMsgReceiver;
+use fragmentos::FragMsgSender;
+use fragmentos::utils::DgramCodec;
 
+/// Maximum size of UDP datagram we are willing to send.
 const MAX_DGRAM_LEN: usize = 512;
 
+/// Get current time
 fn get_cur_instant() -> Instant {
     Instant::now()
 }
 
-struct SocketHolder {
-    opt_udp_socket: Option<UdpSocket>,
-}
-
-/*
-impl SocketHolder {
-    fn recv_dgram<B>(&mut self, recv_buff: B) -> impl Future<Item=(B, usize, SocketAddr), Error=io::Error>
-    where
-        B: AsMut<[u8]>,
-    {
-        let fut_recv_dgram = match self.opt_udp_socket.take() {
-            None => panic!("Socket is already in use!"),
-            Some(udp_socket) => udp_socket.recv_dgram(recv_buff)
-        };
-
-        fut_recv_dgram.and_then(|(udp_socket, recv_buff, size, socket_address)| {
-            self.opt_udp_socket = Some(udp_socket);
-            Ok((recv_buff, size, socket_address))
-        })
-    }
-}
-
-*/
 
 fn main() {
-    /*
-    let addr = env::args().nth(1).unwrap_or("127.0.0.1:8080".to_string());
-    let addr = addr.parse::<SocketAddr>().unwrap();
+    let str_addr = env::args().nth(1).unwrap_or("127.0.0.1:8080".to_string());
+    let addr = str_addr.parse::<SocketAddr>().unwrap();
+
+    println!("Listening on address {}", str_addr);
 
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
     let socket = UdpSocket::bind(&addr, &handle).unwrap();
+    let dgram_codec = DgramCodec;
+    let (sink, stream) = socket.framed(dgram_codec).split();
 
-    let recv_dgram = |buff| {
-        socket.recv_dgram(buff)
-            .and_then(|(_udp_socket, buff, size, socket_addr)| {
-                Ok((buff, size, socket_addr))
-            })
-    };
 
-    let fmr = FragMsgReceiver::new(get_cur_instant, recv_dgram, MAX_DGRAM_LEN);
-    */
+    let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, rand::thread_rng());
+    let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
+
+    let send_all = frag_sender.send_all(frag_receiver);
+    core.run(send_all).unwrap();
+
 }
