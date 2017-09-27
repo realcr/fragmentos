@@ -13,12 +13,11 @@ use futures::{Stream, Sink};
 use tokio_core::net::{UdpSocket};
 use tokio_core::reactor::Core;
 
-use fragmentos::FragMsgReceiver;
-use fragmentos::FragMsgSender;
+use fragmentos::{FragMsgReceiver, FragMsgSender, max_supported_dgram_len};
 use fragmentos::utils::DgramCodec;
 
 /// Maximum size of UDP datagram we are willing to send.
-const MAX_DGRAM_LEN: usize = 512;
+const UDP_MAX_DGRAM: usize = 512;
 
 /// Get current time
 fn get_cur_instant() -> Instant {
@@ -39,9 +38,15 @@ fn main() {
     let dgram_codec = DgramCodec;
     let (sink, stream) = socket.framed(dgram_codec).split();
 
+    let max_dgram_len = std::cmp::min(max_supported_dgram_len(), UDP_MAX_DGRAM);
 
-    let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, rand::thread_rng());
+    let frag_sender = FragMsgSender::new(sink, max_dgram_len, rand::thread_rng());
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
+
+    let frag_receiver = frag_receiver.map(|x| {
+        println!("Received a Fragmentos message.");
+        x
+    });
 
     let send_all = frag_sender.send_all(frag_receiver);
     core.run(send_all).unwrap();
