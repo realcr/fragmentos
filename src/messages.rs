@@ -25,17 +25,21 @@ pub const MESSAGE_ID_LEN: usize = 8;
 pub const ECC_LEN: usize = 8;
 // Length in bytes of nonce in the beginning of the underlying T data:
 pub const NONCE_LEN: usize = 8;
+// Length of all message fields, excluding shareData:
+const FIELDS_LEN: usize = MESSAGE_ID_LEN + 1 + 1 + ECC_LEN;
 
+pub fn max_supported_dgram_len() -> usize {
+    255 - FIELDS_LEN
+}
 
 /// Calculate max possible message for Fragmentos, given the maximum datagram allowed on the
 /// underlying protocol.
 pub fn max_message(max_dgram_len: usize) -> Result<usize,()> {
-    let fields_len = MESSAGE_ID_LEN + 1 + 1 + ECC_LEN;
-    if max_dgram_len <= fields_len {
-        Err(())
-    } else {
-        Ok((128 * (max_dgram_len - fields_len)) - (NONCE_LEN + 1))
+    if max_dgram_len <= FIELDS_LEN {
+        return Err(());
     }
+
+    Ok((128 * (max_dgram_len - FIELDS_LEN)) - (NONCE_LEN + 1))
 }
 
 /// Calculate a hash of T, to obtain messageId.
@@ -61,8 +65,12 @@ pub fn calc_message_id(t: &[u8]) -> Result<Vec<u8>,()> {
 pub fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_dgram_len: usize) 
         -> Result<Vec<Vec<u8>>,()> {
 
+    if max_dgram_len > max_supported_dgram_len() {
+        return Err(());
+    }
+
     if m.len() > max_message(max_dgram_len)? {
-        return Err(())
+        return Err(());
     }
 
     let len_without_padding = MESSAGE_ID_LEN + 1 + m.len();
