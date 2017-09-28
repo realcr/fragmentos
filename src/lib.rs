@@ -7,6 +7,7 @@ extern crate arrayref;
 mod shares;
 mod messages;
 mod state_machine;
+mod rate_limit_sink;
 pub mod utils;
 mod frag_msg_receiver;
 mod frag_msg_sender;
