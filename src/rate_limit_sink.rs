@@ -167,6 +167,7 @@ where
 
     fn adjust_rate(&mut self, cur_instant: Instant) {
 
+        // println!("self.wait_nano = {}", self.wait_nano);
         self.last_adjust_rate = cur_instant;
 
         // We need to adjust rate:
@@ -238,3 +239,38 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use self::tokio_core::reactor::Core;
+    use self::futures::{stream};
+
+
+    #[test]
+    fn test_basic_rate_limit_sink() {
+        let mut core = Core::new().unwrap();
+        let handle = core.handle();
+
+        let (sink, stream) = mpsc::channel::<u32>(0);
+        let rl_sink = rate_limit_sink(sink, 0x100, &handle);
+
+        let items = vec![0_u32; 0x1000];
+        let send_stream = stream::iter_ok(items.clone());
+        handle.spawn(rl_sink.send_all(send_stream).then(|_| Ok(())));
+
+        let mut incoming_items = Vec::new();
+
+        {
+            let keep_messages = stream.for_each(|item| {
+                incoming_items.push(item);
+                Ok(())
+            });
+
+            core.run(keep_messages).unwrap();
+        }
+        assert_eq!(incoming_items, items);
+
+    }
+}
+
