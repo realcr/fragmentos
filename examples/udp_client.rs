@@ -100,6 +100,9 @@ fn gen_msg_with_id<R: Rng>(mut msg_id: u64, max_frag_msg_len: usize, rng: &mut R
     msg
 }
 
+// TODO: Add rate limit to sender here, possibly using a timer.
+// Maybe as a generic Stream rate limiter.
+
 struct MsgStream<R> {
     cur_id: u64,
     num_messages: u64,
