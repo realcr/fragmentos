@@ -189,12 +189,11 @@ where
 
 }
 
-fn rate_limit_sink<T,K,M,KE>(dest_sink: K, max_pending_items: usize, 
+pub fn rate_limit_sink<T,K,KE>(dest_sink: K, max_pending_items: usize, 
                              handle: &reactor::Handle) -> mpsc::Sender<T> 
 where
     T: 'static,
     K: Sink<SinkItem=T,SinkError=KE> + 'static,
-    M: Stream<Item=T,Error=()>,
     KE: 'static,
 {
 
