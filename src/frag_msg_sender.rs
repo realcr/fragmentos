@@ -1,37 +1,45 @@
 extern crate futures;
+extern crate tokio_core;
 extern crate rand;
 
 use std::collections::VecDeque;
 
 use self::futures::{Sink, Poll, StartSend, AsyncSink};
+use self::futures::sync::mpsc;
 use self::rand::Rng;
+use self::tokio_core::reactor;
 
-use ::messages::{max_supported_dgram_len, split_message, NONCE_LEN};
+use ::messages::{max_supported_dgram_len, max_message, split_message, NONCE_LEN};
+use ::rate_limit_sink::rate_limit_sink;
+
+const RATE_LIMIT_BUFF_MULT: usize = 16;
 
 struct PendingDgrams<A> {
     address: A,
     dgrams: VecDeque<Vec<u8>>,
 }
 
-pub struct FragMsgSender<A,R,S,E> 
+pub struct FragMsgSender<A,R> 
 where
     R: Rng,
-    S: Sink<SinkItem=(Vec<u8>, A), SinkError=E>,
 {
-    send_sink: S,
+    send_sink: mpsc::Sender<(Vec<u8>, A)>,
     max_dgram_len: usize,
     rng: R,
     opt_pending_dgrams: Option<PendingDgrams<A>>,
 }
 
 
-impl<A,R,S,E> FragMsgSender<A,R,S,E> 
+impl<A,R> FragMsgSender<A,R> 
 where
     R: Rng,
-    S: Sink<SinkItem=(Vec<u8>, A), SinkError=E>,
+    A: 'static,
 {
-    pub fn new(send_sink: S, max_dgram_len: usize, rng: R) -> Self {
-
+    pub fn new<S,E>(send_sink: S, max_dgram_len: usize, rng: R, handle: &reactor::Handle) -> Self 
+    where
+        S: Sink<SinkItem=(Vec<u8>, A), SinkError=E> + 'static,
+        E: 'static,
+    {
         // Make sure that max_dgram_len is not too large,
         // Due to Reed Solomon usage of GF256 constraint.
         let max_supported = max_supported_dgram_len();
@@ -40,27 +48,24 @@ where
                    max_dgram_len, max_supported);
         }
 
+        let rate_limit_buffer = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
+
         FragMsgSender {
-            send_sink,
+            send_sink: rate_limit_sink(send_sink, rate_limit_buffer, handle),
             max_dgram_len,
             rng,
             opt_pending_dgrams: None,
         }
     }
-
-    pub fn into_inner(self) -> S {
-        self.send_sink
-    }
 }
 
-impl<A,R,S,E> Sink for FragMsgSender<A,R,S,E>
+impl<A,R> Sink for FragMsgSender<A,R>
 where
     A: Copy,
     R: Rng,
-    S: Sink<SinkItem=(Vec<u8>, A), SinkError=E>,
 {
     type SinkItem = (Vec<u8>, A);
-    type SinkError = E;
+    type SinkError = ();
 
     fn start_send(&mut self, item: Self::SinkItem) 
         -> StartSend<Self::SinkItem, Self::SinkError> {
@@ -104,8 +109,7 @@ where
                         pending_dgrams.dgrams.push_front(dgram);
                         return Ok(AsyncSink::NotReady((msg, address)));
                     }
-                    Err(e) => return Err(e),
-
+                    Err(_) => return Err(()),
                 }
             }
         }
@@ -114,7 +118,7 @@ where
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        self.send_sink.poll_complete()
+        self.send_sink.poll_complete().map_err(|_| ())
     }
 
 }
@@ -129,7 +133,7 @@ mod tests {
 
     use self::rand::{StdRng, Rng};
     use self::tokio_core::reactor::Core;
-    use self::futures::Async;
+    use self::futures::{Async, Future, Stream};
 
     use ::state_machine::FragStateMachine;
 
@@ -172,22 +176,29 @@ mod tests {
 
         let seed: &[_] = &[1,2,3,4,5];
         let rng: StdRng = rand::SeedableRng::from_seed(seed);
-        let send_sink = DummySink::new();
+        // let send_sink = DummySink::new();
 
-
-        let fms = FragMsgSender::new(send_sink, MAX_DGRAM_LEN, rng);
-        let send_msg_fut = fms.send((orig_message, ADDRESS));
+        let (send_sink, stream) = mpsc::channel(0);
 
         let mut core = Core::new().unwrap();
-        let fms = core.run(send_msg_fut).unwrap();
+        let handle = core.handle();
 
-        let send_sink = fms.into_inner();
+        let fms = FragMsgSender::new(send_sink, MAX_DGRAM_LEN, rng, &handle);
+        let send_msg_fut = fms.send((orig_message, ADDRESS));
+        handle.spawn(send_msg_fut.then(|_| Ok(())));
+
+        let mut sent_dgrams = Vec::new();
+        {
+            let collector = stream.for_each(|item| {
+                sent_dgrams.push(item);
+                Ok(())
+            });
+            core.run(collector).unwrap();
+        }
 
         // Feed a Fragmentos state machine with the sent messages:
         let mut fsm = FragStateMachine::new();
         let mut cur_inst = Instant::now();
-
-        let sent_dgrams = &send_sink.sent;
 
         let b = (sent_dgrams.len() + 1) / 2;
         for i in 0 .. b - 1 {

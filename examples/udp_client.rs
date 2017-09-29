@@ -170,10 +170,11 @@ fn main() {
 
     let frag_sender = FragMsgSender::new(sink, 
                                          max_dgram_len, 
-                                         rand::thread_rng());
+                                         rand::thread_rng(),
+                                         &handle);
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
 
-    let send_all = frag_sender.send_all(msg_stream)
+    let send_all = frag_sender.send_all(msg_stream.map_err(|_| ()))
         .then(|_| Ok(()));
 
     // Messages sender:

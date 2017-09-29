@@ -24,12 +24,14 @@ fn basic_test_sender_receiver() {
     let rng: StdRng = rand::SeedableRng::from_seed(seed);
 
     let get_cur_instant = || Instant::now();
+    let mut core = Core::new().unwrap();
+    let handle = core.handle();
 
     // We send tuples of (message_bytes, address)
     // let (sink, stream) = sink_stream_pair::<(Vec<u8>, u32)>(1);
     let (sink, stream) = mpsc::channel::<(Vec<u8>, u32)>(0);
 
-    let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, rng);
+    let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, rng, &handle);
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
 
     let messages: Vec<(Vec<u8>, u32)> = vec![
@@ -50,8 +52,6 @@ fn basic_test_sender_receiver() {
     let mut incoming_messages = Vec::new();
 
     {
-        let mut core = Core::new().unwrap();
-        let handle = core.handle();
 
         // Start a task to send all of our messages:
         handle.spawn(send_all.then(|_| Ok(())));

@@ -40,7 +40,7 @@ fn main() {
 
     let max_dgram_len = std::cmp::min(max_supported_dgram_len(), UDP_MAX_DGRAM);
 
-    let frag_sender = FragMsgSender::new(sink, max_dgram_len, rand::thread_rng());
+    let frag_sender = FragMsgSender::new(sink, max_dgram_len, rand::thread_rng(), &handle);
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
 
     let frag_receiver = frag_receiver.map(|x| {
@@ -48,7 +48,7 @@ fn main() {
         x
     });
 
-    let send_all = frag_sender.send_all(frag_receiver);
+    let send_all = frag_sender.send_all(frag_receiver.map_err(|_| ()));
     core.run(send_all).unwrap();
 
 }
