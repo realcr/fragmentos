@@ -3,15 +3,11 @@ extern crate futures;
 extern crate tokio_core;
 extern crate fragmentos;
 
-use std::io;
-use futures::sync::mpsc;
-
 use std::time::Instant;
 
 use rand::StdRng;
-
-use futures::{stream, Future, Stream, Sink, Poll, StartSend, AsyncSink, Async};
-use futures::task::Task;
+use futures::{stream, Future, Stream, Sink};
+use futures::sync::mpsc;
 
 use fragmentos::FragMsgReceiver;
 use fragmentos::FragMsgSender;
