@@ -23,6 +23,7 @@ enum RateLimitFutureError<KE> {
 const MILLISECOND: u32 = 1_000_000;
 const WAIT_ADJUST: u32 = MILLISECOND;
 const MAX_WAIT: u32 = 50 * MILLISECOND;
+const WAIT_RATE_ADJUST: u32 = 2*MAX_WAIT;
 
 struct RateLimitFuture<T,K,M,KE> {
     dest_sink: K,
@@ -32,37 +33,76 @@ struct RateLimitFuture<T,K,M,KE> {
     last_send: Instant,     // Last time a datagram was sent
     wait_nano: u32,         // Time to wait between sending datagrams, in nanoseconds
     opt_next_send_timer: Option<reactor::Timeout>,
+    last_adjust_rate: Instant,
+    adjust_rate_timer: reactor::Timeout,
     handle: reactor::Handle,
     phantom_ke: PhantomData<KE>,
 }
 
-impl<T,K,M,KE> RateLimitFuture<T,K,M,KE> {
+impl<T,K,M,KE> RateLimitFuture<T,K,M,KE> 
+where
+    K: Sink<SinkItem=T,SinkError=KE> + 'static,
+    M: Stream<Item=T,Error=()>,
+{
     fn new(dest_sink: K, src_stream: M, max_pending_items: usize, 
            handle: &reactor::Handle) -> Self {
+
+        let past_instant = Instant::now() - Duration::new(0,3*MAX_WAIT);
 
         RateLimitFuture {
             dest_sink,
             opt_src_stream: Some(src_stream),
             pending_items: VecDeque::new(),
             max_pending_items,
-            last_send: Instant::now() - Duration::new(0,2*MAX_WAIT),
+            last_send: past_instant,
             wait_nano: MAX_WAIT,
             opt_next_send_timer: None, 
+            last_adjust_rate: past_instant,
+            adjust_rate_timer: 
+                reactor::Timeout::new(Duration::new(0,WAIT_RATE_ADJUST), handle).unwrap(),
             handle: handle.clone(),
             // reactor::Timeout::new(Duration::new(0,MAX_WAIT), handle).unwrap(),
             phantom_ke: PhantomData,
         }
     }
 
+    /// Keep reading items from the source stream as long as we have
+    /// enough room in self.pending_items
+    /// If src_stream has no more items, opt_src_stream is set to be None.
+    fn read_items(&mut self) -> Result<(), RateLimitFutureError<KE>> {
+        while self.pending_items.len() < self.max_pending_items {
+            match self.opt_src_stream.take() {
+                None => break,
+                Some(mut src_stream) => { 
+                    match src_stream.poll() {
+                        Ok(Async::Ready(Some(item))) => { 
+                            self.pending_items.push_back(item);
+                            self.opt_src_stream = Some(src_stream);
+                        }
+                        Ok(Async::Ready(None)) => break,
+                        Ok(Async::NotReady) => {
+                            self.opt_src_stream = Some(src_stream);
+                            break;
+                        }
+                        Err(()) => return Err(RateLimitFutureError::SrcStreamError),
+                    };
+                },
+            }
+        } 
+        Ok(())
+    }
+
     /// Check if we have an alloted timeslot to send a datagram.
-    fn may_send_datagram(&self, cur_instant: Instant) -> bool {
+    fn may_send_item(&self, cur_instant: Instant) -> bool {
         cur_instant.duration_since(self.last_send) >= 
             Duration::new(0, self.wait_nano)
     }
 
-    /// Possibly reset the internal timer.
-    fn reset_timer(&mut self, cur_instant: Instant) -> Result<(), RateLimitFutureError<KE>> {
-        self.opt_next_send_timer = None;
+    /// Reset the internal timer.
+    /// If there are no pending items to be sent, timer is dropped.
+    fn reset_next_send_timer(&mut self, cur_instant: Instant) 
+        -> Result<(), RateLimitFutureError<KE>> {
+
         if self.pending_items.len() == 0 {
             // We don't need a timer.
             self.opt_next_send_timer = None;
@@ -76,14 +116,60 @@ impl<T,K,M,KE> RateLimitFuture<T,K,M,KE> {
             Ok(timer) => timer,
             Err(e) => return Err(RateLimitFutureError::TimeoutCreationError(e)),
         };
-        // Make sure that we are notified when the timer ticks:
+        // Make sure that we are notified when the timer ticks.
         // TODO: Make sure that doing this kind of thing is reasonable:
         timer.poll();
         self.opt_next_send_timer = Some(timer);
         Ok(())
     }
 
-    fn update_rate(&mut self) {
+    fn try_send_item(&mut self, cur_instant: Instant) 
+        -> Result<(), RateLimitFutureError<KE>> {
+
+        match self.pending_items.pop_front() {
+            Some(item) => {
+                match self.dest_sink.start_send(item) {
+                    Ok(AsyncSink::NotReady(item)) => {
+                        self.pending_items.push_front(item);
+                    },
+                    Ok(AsyncSink::Ready) => {
+                        self.last_send = cur_instant;
+                    },
+                    Err(e) => return Err(RateLimitFutureError::DestSinkError(e)),
+                };
+            },
+            None => {},
+        };
+        Ok(())
+    }
+
+    /// Check if we are allowed to adjust rate at this time.
+    fn may_adjust_rate(&self, cur_instant: Instant) -> bool {
+        cur_instant.duration_since(self.last_adjust_rate) >=
+            Duration::new(0, WAIT_RATE_ADJUST)
+    }
+
+    fn reset_adjust_rate_timer(&mut self, cur_instant: Instant) 
+        -> Result<(), RateLimitFutureError<KE>> {
+
+        self.adjust_rate_timer = match reactor::Timeout::new(
+            Duration::new(0,WAIT_RATE_ADJUST), &self.handle) {
+
+            Ok(timer) => timer,
+            Err(e) => return Err(RateLimitFutureError::TimeoutCreationError(e)),
+        };
+        // Register to be polled when the timer is ready:
+        self.adjust_rate_timer.poll();
+
+        Ok(())
+    }
+
+
+    fn adjust_rate(&mut self, cur_instant: Instant) {
+
+        self.last_adjust_rate = cur_instant;
+
+        // We need to adjust rate:
         // Possibly adjust rate limit, according to how many messages are pending:
         if self.pending_items.len() > 3*self.max_pending_items / 4 {
             // We need to send faster:
@@ -120,55 +206,30 @@ where
 
 impl<T,K,M,KE> Future for RateLimitFuture<T,K,M,KE> 
 where
-    K: Sink<SinkItem=T, SinkError=KE>,
+    K: Sink<SinkItem=T, SinkError=KE> + 'static,
     M: Stream<Item=T,Error=()>,
 {
     type Item = ();
     type Error = RateLimitFutureError<KE>;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        // Keep reading as long as we have space in the pending_items buffer:
-        while self.pending_items.len() < self.max_pending_items {
-            match self.opt_src_stream.take() {
-                None => break,
-                Some(mut src_stream) => { 
-                    match src_stream.poll() {
-                        Ok(Async::Ready(Some(item))) => { 
-                            self.pending_items.push_back(item);
-                            self.opt_src_stream = Some(src_stream);
-                        }
-                        Ok(Async::Ready(None)) => break,
-                        Ok(Async::NotReady) => {
-                            self.opt_src_stream = Some(src_stream);
-                            break;
-                        }
-                        Err(()) => return Err(RateLimitFutureError::SrcStreamError),
-                    };
-                },
-            }
-        } 
-
+        // Get current time:
         let cur_instant = Instant::now();
-        if self.may_send_datagram(cur_instant) {
-            match self.pending_items.pop_front() {
-                Some(item) => {
-                    match self.dest_sink.start_send(item) {
-                        Ok(AsyncSink::NotReady(item)) => {
-                            self.pending_items.push_front(item);
-                        },
-                        Ok(AsyncSink::Ready) => {
-                            self.last_send = cur_instant;
-                        },
-                        Err(e) => return Err(RateLimitFutureError::DestSinkError(e)),
-                    };
-                },
-                None => {},
-            }
+
+        self.read_items()?;
+
+        if self.may_send_item(cur_instant) {
+            self.try_send_item(cur_instant)?;
         }
 
         // Make sure that we will be polled again in time for the 
         // next time slot for sending a datagram, or earlier.
-        self.reset_timer(cur_instant)?;
+        self.reset_next_send_timer(cur_instant)?;
+
+        if self.may_adjust_rate(cur_instant) {
+            self.adjust_rate(cur_instant);
+            self.reset_adjust_rate_timer(cur_instant)?;
+        }
 
         if (self.pending_items.len() == 0) && self.opt_src_stream.is_none() {
             // We are done consuming all of self.src_streams items.
@@ -177,5 +238,4 @@ where
             Ok(Async::NotReady)
         }
     }
-
 }
