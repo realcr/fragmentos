@@ -253,9 +253,9 @@ mod tests {
         let handle = core.handle();
 
         let (sink, stream) = mpsc::channel::<u32>(0);
-        let rl_sink = rate_limit_sink(sink, 0x100, &handle);
+        let rl_sink = rate_limit_sink(sink, 0x40, &handle);
 
-        let items = vec![0_u32; 0x1000];
+        let items = vec![0_u32; 0x500];
         let send_stream = stream::iter_ok(items.clone());
         handle.spawn(rl_sink.send_all(send_stream).then(|_| Ok(())));
 
