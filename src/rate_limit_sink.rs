@@ -5,6 +5,7 @@ use std::io;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use std::fmt;
 use std::marker::PhantomData;
 
 use self::futures::sync::mpsc;
@@ -44,6 +45,7 @@ impl<T,SK,SM,SKE> RateLimitFuture<T,SK,SM,SKE>
 where
     SK: Sink<SinkItem=T,SinkError=SKE> + 'static,
     SM: Stream<Item=T,Error=()>,
+    T: fmt::Debug
 {
     fn new(dest_sink: SK, src_stream: SM, max_pending_items: usize, 
            handle: &reactor::Handle) -> Self {
@@ -142,25 +144,29 @@ where
         }
     }
 
+    /// Returns true if we are ready for another read.
     fn try_send_item(&mut self, cur_instant: Instant) 
         -> Result<(), RateLimitFutureError<SKE>> {
 
         match self.pending_items.pop_front() {
             Some(item) => {
+                // println!("item = {:?}",item);
                 match self.dest_sink.start_send(item) {
                     Ok(AsyncSink::NotReady(item)) => {
+                        // println!("Item could not be sent!");
                         self.pending_items.push_front(item);
                         // We don't need a timer if we can not send messages:
                         self.opt_next_send_timer = None;
                     },
                     Ok(AsyncSink::Ready) => {
+                        // println!("Item was sent!");
                         self.last_send = cur_instant;
                     },
                     Err(e) => return Err(RateLimitFutureError::DestSinkError(e)),
-                };
+                }
             },
             None => {},
-        };
+        }
         Ok(())
     }
 
@@ -187,7 +193,7 @@ where
     /// Adjust the time to wait between sending two messages.
     fn adjust_rate(&mut self) {
 
-        // println!("self.wait_nano = {}", self.wait_nano);
+        println!("self.wait_nano = {}", self.wait_nano);
 
         // We need to adjust rate:
         // Possibly adjust rate limit, according to how many messages are pending:
@@ -213,7 +219,7 @@ where
 pub fn rate_limit_sink<T,SK,SKE>(dest_sink: SK, max_pending_items: usize, 
                              handle: &reactor::Handle) -> mpsc::Sender<T> 
 where
-    T: 'static,
+    T: fmt::Debug + 'static,
     SK: Sink<SinkItem=T,SinkError=SKE> + 'static,
     SKE: 'static,
 {
@@ -228,6 +234,7 @@ impl<T,SK,SM,SKE> Future for RateLimitFuture<T,SK,SM,SKE>
 where
     SK: Sink<SinkItem=T, SinkError=SKE> + 'static,
     SM: Stream<Item=T,Error=()>,
+    T: fmt::Debug
 {
     type Item = ();
     type Error = RateLimitFutureError<SKE>;
@@ -237,16 +244,18 @@ where
         // Get current time:
         let cur_instant = Instant::now();
 
-        self.read_items()?;
-
         while self.may_send_item(cur_instant)? {
             self.try_send_item(cur_instant)?;
         }
 
+        // println!("read_items");
+        self.read_items()?;
+
         if self.may_adjust_rate(cur_instant)? {
             self.adjust_rate();
         }
-        // println!("{}", self.opt_next_send_timer.is_none());
+        // println!("opt_next_send_timer.is_none() == {}", self.opt_next_send_timer.is_none());
+        // println!("self.pending_items.len() == {}", self.pending_items.len());
 
         if (self.pending_items.len() == 0) && self.opt_src_stream.is_none() {
             // We are done consuming all of self.src_streams items.
