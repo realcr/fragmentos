@@ -14,7 +14,7 @@ use self::tokio_core::reactor;
 
 enum RateLimitFutureError<SKE> {
     SrcStreamError,
-    TimeoutError(io::Error),
+    // TimeoutError(io::Error),
     DestSinkError(SKE),
     TimeoutCreationError(io::Error),
     SendTimeoutPollError(io::Error),
@@ -35,7 +35,6 @@ struct RateLimitFuture<T,SK,SM,SKE> {
     last_send: Instant,     // Last time a datagram was sent
     wait_nano: u32,         // Time to wait between sending datagrams, in nanoseconds
     opt_next_send_timer: Option<reactor::Timeout>,
-    last_adjust_rate: Instant,
     adjust_rate_timer: reactor::Timeout,
     handle: reactor::Handle,
     phantom_ske: PhantomData<SKE>,
@@ -59,7 +58,6 @@ where
             last_send: past_instant,
             wait_nano: MAX_WAIT,
             opt_next_send_timer: None, 
-            last_adjust_rate: past_instant,
             adjust_rate_timer: 
                 reactor::Timeout::new(Duration::new(0,WAIT_RATE_ADJUST), handle).unwrap(),
             handle: handle.clone(),
@@ -92,14 +90,6 @@ where
         } 
         Ok(())
     }
-
-    /*
-    /// Check if we have an alloted timeslot to send a datagram.
-    fn may_send_item(&self, cur_instant: Instant) -> bool {
-        cur_instant.duration_since(self.last_send) >= 
-            Duration::new(0, self.wait_nano)
-    }
-    */
 
     fn reset_next_send_timer(&mut self, cur_instant: Instant) 
         -> Result<(), RateLimitFutureError<SKE>> {
@@ -171,36 +161,29 @@ where
     }
 
     /// Check if we are allowed to adjust rate at this time.
-    fn may_adjust_rate(&self, cur_instant: Instant) -> bool {
-        cur_instant.duration_since(self.last_adjust_rate) >=
-            Duration::new(0, WAIT_RATE_ADJUST)
-    }
+    fn may_adjust_rate(&mut self, cur_instant: Instant) 
+        -> Result<bool, RateLimitFutureError<SKE>> {
 
-    fn reset_adjust_rate_timer(&mut self, cur_instant: Instant) 
-        -> Result<(), RateLimitFutureError<SKE>> {
-
-        self.adjust_rate_timer = match reactor::Timeout::new(
-            Duration::new(0,WAIT_RATE_ADJUST), &self.handle) {
-
-            Ok(timer) => timer,
-            Err(e) => return Err(RateLimitFutureError::TimeoutCreationError(e)),
-        };
-
-        // Register to be polled when the timer is ready:
         match self.adjust_rate_timer.poll() {
-            Ok(Async::Ready(())) => panic!("adjust rate timer is ready too early!"),
-            Ok(Async::NotReady) => {},
+            Ok(Async::Ready(())) => {
+                // Reset the timer:
+                self.adjust_rate_timer = match reactor::Timeout::new_at(
+                    cur_instant + Duration::new(0,WAIT_RATE_ADJUST), &self.handle) {
+
+                    Ok(timer) => timer,
+                    Err(e) => return Err(RateLimitFutureError::TimeoutCreationError(e)),
+                };
+                Ok(true)
+            },
+            Ok(Async::NotReady) => Ok(false),
             Err(e) => return Err(RateLimitFutureError::RateTimeoutPollError(e)),
         }
-
-        Ok(())
     }
 
+    /// Adjust the time to wait between sending two messages.
+    fn adjust_rate(&mut self) {
 
-    fn adjust_rate(&mut self, cur_instant: Instant) {
-
-        // println!("self.wait_nano = {}", self.wait_nano);
-        self.last_adjust_rate = cur_instant;
+        println!("self.wait_nano = {}", self.wait_nano);
 
         // We need to adjust rate:
         // Possibly adjust rate limit, according to how many messages are pending:
@@ -233,7 +216,7 @@ where
 
     let (sink, stream) = mpsc::channel::<T>(0);
     handle.spawn(RateLimitFuture::new(dest_sink, stream, max_pending_items, handle)
-                 .map_err(|e: RateLimitFutureError<SKE>| ()));
+                 .map_err(|_: RateLimitFutureError<SKE>| ()));
     sink
 }
 
@@ -255,9 +238,8 @@ where
             self.try_send_item(cur_instant)?;
         }
 
-        if self.may_adjust_rate(cur_instant) {
-            self.adjust_rate(cur_instant);
-            self.reset_adjust_rate_timer(cur_instant)?;
+        if self.may_adjust_rate(cur_instant)? {
+            self.adjust_rate();
         }
 
         if (self.pending_items.len() == 0) && self.opt_src_stream.is_none() {
