@@ -3,6 +3,7 @@ extern crate tokio_core;
 extern crate rand;
 
 use std::collections::VecDeque;
+use std::marker::PhantomData;
 
 use self::futures::{Sink, Poll, StartSend, AsyncSink};
 use self::futures::sync::mpsc;
@@ -19,27 +20,23 @@ struct PendingDgrams<A> {
     dgrams: VecDeque<Vec<u8>>,
 }
 
-pub struct FragMsgSender<A,R> 
-where
-    R: Rng,
-{
-    send_sink: mpsc::Sender<(Vec<u8>, A)>,
+pub struct FragMsgSender<A,R,SK,SKE> {
+    send_sink: SK,
     max_dgram_len: usize,
     rng: R,
     opt_pending_dgrams: Option<PendingDgrams<A>>,
+    phantom_sk: PhantomData<SK>,
+    phantom_ske: PhantomData<SKE>,
 }
 
 
-impl<A,R> FragMsgSender<A,R> 
+impl<A,R,SK,SKE> FragMsgSender<A,R,SK,SKE> 
 where
     R: Rng,
     A: 'static,
+    SK: Sink<SinkItem=(Vec<u8>, A), SinkError=SKE>
 {
-    pub fn new<S,E>(send_sink: S, max_dgram_len: usize, rng: R, handle: &reactor::Handle) -> Self 
-    where
-        S: Sink<SinkItem=(Vec<u8>, A), SinkError=E> + 'static,
-        E: 'static,
-    {
+    pub fn new(send_sink: SK, max_dgram_len: usize, rng: R, handle: &reactor::Handle) -> Self {
         // Make sure that max_dgram_len is not too large,
         // Due to Reed Solomon usage of GF256 constraint.
         let max_supported = max_supported_dgram_len();
@@ -51,18 +48,26 @@ where
         let rate_limit_buffer = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
 
         FragMsgSender {
-            send_sink: rate_limit_sink(send_sink, rate_limit_buffer, handle),
+            send_sink, 
             max_dgram_len,
             rng,
             opt_pending_dgrams: None,
+            phantom_sk: PhantomData,
+            phantom_ske: PhantomData,
         }
+    }
+
+    /// Get the original inner send_sink
+    fn into_inner(self) -> SK {
+        self.send_sink
     }
 }
 
-impl<A,R> Sink for FragMsgSender<A,R>
+impl<A,R,SK,SKE> Sink for FragMsgSender<A,R,SK,SKE>
 where
     A: Copy,
     R: Rng,
+    SK: Sink<SinkItem=(Vec<u8>, A), SinkError=SKE>
 {
     type SinkItem = (Vec<u8>, A);
     type SinkError = ();
@@ -137,6 +142,7 @@ mod tests {
 
     use ::state_machine::FragStateMachine;
 
+    /*
     struct DummySink<T> {
         sent: VecDeque<T>,
     }
@@ -163,6 +169,7 @@ mod tests {
             Ok(Async::Ready(()))
         }
     }
+    */
 
 
     #[test]
