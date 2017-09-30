@@ -13,11 +13,15 @@ use futures::{Stream, Sink};
 use tokio_core::net::{UdpSocket};
 use tokio_core::reactor::Core;
 
-use fragmentos::{FragMsgReceiver, FragMsgSender, max_supported_dgram_len};
+use fragmentos::{FragMsgReceiver, FragMsgSender, max_supported_dgram_len, 
+    max_message, rate_limit_sink};
 use fragmentos::utils::DgramCodec;
 
-/// Maximum size of UDP datagram we are willing to send.
+// Maximum size of UDP datagram we are willing to send.
 const UDP_MAX_DGRAM: usize = 512;
+
+// Multiplier for the calculation of rate limit buffer:
+const RATE_LIMIT_BUFF_MULT: usize = 16;
 
 /// Get current time
 fn get_cur_instant() -> Instant {
@@ -40,11 +44,13 @@ fn main() {
 
     let max_dgram_len = std::cmp::min(max_supported_dgram_len(), UDP_MAX_DGRAM);
 
-    let frag_sender = FragMsgSender::new(sink, max_dgram_len, rand::thread_rng());
+    let rate_limit_buffer = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
+    let rl_sink = rate_limit_sink(sink, rate_limit_buffer, &handle);
+    let frag_sender = FragMsgSender::new(rl_sink, max_dgram_len, rand::thread_rng());
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
 
     let frag_receiver = frag_receiver.map(|x| {
-        println!("Received a Fragmentos message.");
+        // println!("Received a Fragmentos message.");
         x
     });
 

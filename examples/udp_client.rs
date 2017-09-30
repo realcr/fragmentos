@@ -8,7 +8,7 @@ extern crate fragmentos;
 use std::net::SocketAddr;
 use std::io;
 use std::{env};
-use std::time::Instant;
+use std::time::{Instant, Duration};
 use std::collections::HashSet;
 
 use rand::Rng;
@@ -16,19 +16,27 @@ use self::rand::distributions::{IndependentSample, Range};
 
 use futures::{Stream, Sink, Future, Poll, Async};
 // use futures::stream::IterOk;
-use futures::future;
+use futures::{future, IntoFuture};
 
 use tokio_core::net::{UdpSocket};
+use tokio_core::reactor;
 use tokio_core::reactor::Core;
 
-use fragmentos::{FragMsgReceiver, FragMsgSender, max_supported_dgram_len, max_message};
+use fragmentos::{FragMsgReceiver, FragMsgSender, 
+    rate_limit_sink, max_supported_dgram_len, max_message};
 use fragmentos::utils::DgramCodec;
 
-/// Maximum size of UDP datagram we are willing to send.
+// Multiplier for the calculation of rate limit buffer:
+const RATE_LIMIT_BUFF_MULT: usize = 16;
+
+// A millisecond in nanoseconds:
+const MILLISECOND: u32 = 1_000_000;
+
+// Maximum size of UDP datagram we are willing to send.
 const UDP_MAX_DGRAM: usize = 512;
 
 // Maximum message size we are going to send using Fragmentos
-const MAX_FRAG_MSG_LEN: usize = 1000;
+const MAX_FRAG_MSG_LEN: usize = 20000;
 
 /// Get current time
 fn get_cur_instant() -> Instant {
@@ -46,7 +54,7 @@ struct Collector<S> {
 impl<S> Collector<S> {
     /// Process a message. Returns true if we should stop waiting for messages.
     fn process_msg(&mut self, msg: Vec<u8>) -> bool {
-        println!("process_msg.");
+        // println!("self.received_ids.len() = {}",self.received_ids.len());
         match get_msg_id(&msg) {
             None => {
                 self.num_invalid += 1;
@@ -161,7 +169,6 @@ fn main() {
 
     println!("max_message = {}", max_message(max_dgram_len).unwrap());
 
-    // let messages = vec![b"hello world!".to_vec(), b"Another hello!".to_vec()];
     let msg_stream = MsgStream {
         cur_id: 0,
         num_messages,
@@ -170,13 +177,26 @@ fn main() {
         max_frag_msg_len: MAX_FRAG_MSG_LEN, //max_message(max_dgram_len).unwrap(),
     };
 
-
-    let frag_sender = FragMsgSender::new(sink, 
+    let rate_limit_buffer = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
+    let rl_sink = rate_limit_sink(sink, rate_limit_buffer, &handle);
+    let frag_sender = FragMsgSender::new(rl_sink,
                                          max_dgram_len, 
                                          rand::thread_rng());
+
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
 
-    let send_all = frag_sender.send_all(msg_stream.map_err(|_| ()))
+    // Add some delay to the message stream:
+    let chandle = handle.clone();
+    let msg_stream = msg_stream
+            .and_then(move |item| {
+                      // println!("Sending an item...");
+                      let cchandle = chandle.clone();
+                      reactor::Timeout::new(Duration::new(0,MILLISECOND * 10), &cchandle)
+                          .into_future()
+                          .and_then(move |timeout| timeout.and_then(move |_| Ok(item)))
+            });
+
+    let send_all = frag_sender.send_all(msg_stream.map_err(|_| panic!("Error!")))
         .then(|_| Ok(()));
 
     // Messages sender:
