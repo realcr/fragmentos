@@ -15,6 +15,7 @@ mod frag_msg_sender;
 
 pub use ::frag_msg_receiver::FragMsgReceiver;
 pub use ::frag_msg_sender::FragMsgSender;
+pub use ::rate_limit_sink::rate_limit_sink;
 pub use ::messages::{max_supported_dgram_len, max_message};
 
 
