@@ -91,11 +91,11 @@ where
         Ok(())
     }
 
-    fn reset_next_send_timer(&mut self, cur_instant: Instant) 
+    fn reset_next_send_timer(&mut self) 
         -> Result<(), RateLimitFutureError<SKE>> {
 
         let timer = match reactor::Timeout::new_at(
-            cur_instant + Duration::new(0, self.wait_nano), &self.handle) {
+            self.last_send + Duration::new(0, self.wait_nano), &self.handle) {
             Ok(timer) => timer,
             Err(e) => return Err(RateLimitFutureError::TimeoutCreationError(e)),
         };
@@ -116,22 +116,26 @@ where
 
         match self.opt_next_send_timer.take() {
             None => {
-                if cur_instant.duration_since(self.last_send) >= 
+                if cur_instant.duration_since(cur_instant) >= 
                     Duration::new(0, self.wait_nano) {
 
-                    self.reset_next_send_timer(cur_instant)?;
+                    self.reset_next_send_timer()?;
                     Ok(true)
                 } else {
+                    self.reset_next_send_timer()?;
                     Ok(false)
                 }
             },
             Some(mut next_send_timer) => {
                 match next_send_timer.poll() {
                     Ok(Async::Ready(())) => {
-                        self.reset_next_send_timer(cur_instant)?;
+                        self.reset_next_send_timer()?;
                         Ok(true)
                     },
-                    Ok(Async::NotReady) => Ok(false),
+                    Ok(Async::NotReady) => {
+                        self.opt_next_send_timer = Some(next_send_timer);
+                        Ok(false)
+                    },
                     Err(e) => return Err(RateLimitFutureError::SendTimeoutPollError(e)),
                 }
             }
