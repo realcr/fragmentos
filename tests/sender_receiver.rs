@@ -31,7 +31,7 @@ fn basic_test_sender_receiver() {
     // let (sink, stream) = sink_stream_pair::<(Vec<u8>, u32)>(1);
     let (sink, stream) = mpsc::channel::<(Vec<u8>, u32)>(0);
 
-    let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, rng, &handle);
+    let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, rng);
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
 
     let messages: Vec<(Vec<u8>, u32)> = vec![

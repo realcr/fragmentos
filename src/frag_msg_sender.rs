@@ -36,7 +36,7 @@ where
     A: 'static,
     SK: Sink<SinkItem=(Vec<u8>, A), SinkError=SKE>
 {
-    pub fn new(send_sink: SK, max_dgram_len: usize, rng: R, handle: &reactor::Handle) -> Self {
+    pub fn new(send_sink: SK, max_dgram_len: usize, rng: R) -> Self {
         // Make sure that max_dgram_len is not too large,
         // Due to Reed Solomon usage of GF256 constraint.
         let max_supported = max_supported_dgram_len();
@@ -190,7 +190,7 @@ mod tests {
         let mut core = Core::new().unwrap();
         let handle = core.handle();
 
-        let fms = FragMsgSender::new(send_sink, MAX_DGRAM_LEN, rng, &handle);
+        let fms = FragMsgSender::new(send_sink, MAX_DGRAM_LEN, rng);
         let send_msg_fut = fms.send((orig_message, ADDRESS));
         handle.spawn(send_msg_fut.then(|_| Ok(())));
 
