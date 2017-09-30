@@ -17,6 +17,8 @@ enum RateLimitFutureError<SKE> {
     TimeoutError(io::Error),
     DestSinkError(SKE),
     TimeoutCreationError(io::Error),
+    SendTimeoutPollError(io::Error),
+    RateTimeoutPollError(io::Error),
 }
 
 // Amount of nanoseconds in a millisecond:
@@ -61,7 +63,6 @@ where
             adjust_rate_timer: 
                 reactor::Timeout::new(Duration::new(0,WAIT_RATE_ADJUST), handle).unwrap(),
             handle: handle.clone(),
-            // reactor::Timeout::new(Duration::new(0,MAX_WAIT), handle).unwrap(),
             phantom_ske: PhantomData,
         }
     }
@@ -92,35 +93,59 @@ where
         Ok(())
     }
 
+    /*
     /// Check if we have an alloted timeslot to send a datagram.
     fn may_send_item(&self, cur_instant: Instant) -> bool {
         cur_instant.duration_since(self.last_send) >= 
             Duration::new(0, self.wait_nano)
     }
+    */
 
-    /// Reset the internal timer.
-    /// If there are no pending items to be sent, timer is dropped.
     fn reset_next_send_timer(&mut self, cur_instant: Instant) 
         -> Result<(), RateLimitFutureError<SKE>> {
 
-        if self.pending_items.len() == 0 {
-            // We don't need a timer.
-            self.opt_next_send_timer = None;
-            return Ok(());
-        }
-        let wait_dur = Duration::new(0, self.wait_nano);
-        let dur_since_last_send = cur_instant - self.last_send;
-        
-        let mut timer = match reactor::Timeout::new(
-            wait_dur - dur_since_last_send, &self.handle) {
+        let timer = match reactor::Timeout::new_at(
+            cur_instant + Duration::new(0, self.wait_nano), &self.handle) {
             Ok(timer) => timer,
             Err(e) => return Err(RateLimitFutureError::TimeoutCreationError(e)),
         };
-        // Make sure that we are notified when the timer ticks.
-        // TODO: Make sure that doing this kind of thing is reasonable:
-        timer.poll();
         self.opt_next_send_timer = Some(timer);
         Ok(())
+    }
+
+    /// Check if we may send an item.
+    /// Reset timer if necessary.
+    fn may_send_item(&mut self, cur_instant: Instant) 
+        -> Result<bool, RateLimitFutureError<SKE>> {
+
+        if self.pending_items.len() == 0 {
+            // We don't need a timer if there is nothing to send.
+            self.opt_next_send_timer = None;
+            return Ok(false);
+        }
+
+        match self.opt_next_send_timer.take() {
+            None => {
+                if cur_instant.duration_since(self.last_send) >= 
+                    Duration::new(0, self.wait_nano) {
+
+                    self.reset_next_send_timer(cur_instant)?;
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            },
+            Some(mut next_send_timer) => {
+                match next_send_timer.poll() {
+                    Ok(Async::Ready(())) => {
+                        self.reset_next_send_timer(cur_instant)?;
+                        Ok(true)
+                    },
+                    Ok(Async::NotReady) => Ok(false),
+                    Err(e) => return Err(RateLimitFutureError::SendTimeoutPollError(e)),
+                }
+            }
+        }
     }
 
     fn try_send_item(&mut self, cur_instant: Instant) 
@@ -131,6 +156,8 @@ where
                 match self.dest_sink.start_send(item) {
                     Ok(AsyncSink::NotReady(item)) => {
                         self.pending_items.push_front(item);
+                        // We don't need a timer if we can not send messages:
+                        self.opt_next_send_timer = None;
                     },
                     Ok(AsyncSink::Ready) => {
                         self.last_send = cur_instant;
@@ -158,8 +185,13 @@ where
             Ok(timer) => timer,
             Err(e) => return Err(RateLimitFutureError::TimeoutCreationError(e)),
         };
+
         // Register to be polled when the timer is ready:
-        self.adjust_rate_timer.poll();
+        match self.adjust_rate_timer.poll() {
+            Ok(Async::Ready(())) => panic!("adjust rate timer is ready too early!"),
+            Ok(Async::NotReady) => {},
+            Err(e) => return Err(RateLimitFutureError::RateTimeoutPollError(e)),
+        }
 
         Ok(())
     }
@@ -175,6 +207,7 @@ where
         if self.pending_items.len() > 3*self.max_pending_items / 4 {
             // We need to send faster:
             self.wait_nano /= 2;
+            self.wait_nano += 1;
         }
 
         if self.pending_items.len() < self.max_pending_items / 4 {
@@ -218,13 +251,9 @@ where
 
         self.read_items()?;
 
-        if self.may_send_item(cur_instant) {
+        while self.may_send_item(cur_instant)? {
             self.try_send_item(cur_instant)?;
         }
-
-        // Make sure that we will be polled again in time for the 
-        // next time slot for sending a datagram, or earlier.
-        self.reset_next_send_timer(cur_instant)?;
 
         if self.may_adjust_rate(cur_instant) {
             self.adjust_rate(cur_instant);
