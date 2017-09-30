@@ -187,7 +187,7 @@ where
     /// Adjust the time to wait between sending two messages.
     fn adjust_rate(&mut self) {
 
-        println!("self.wait_nano = {}", self.wait_nano);
+        // println!("self.wait_nano = {}", self.wait_nano);
 
         // We need to adjust rate:
         // Possibly adjust rate limit, according to how many messages are pending:
@@ -233,6 +233,7 @@ where
     type Error = RateLimitFutureError<SKE>;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        // println!("poll.");
         // Get current time:
         let cur_instant = Instant::now();
 
@@ -245,6 +246,7 @@ where
         if self.may_adjust_rate(cur_instant)? {
             self.adjust_rate();
         }
+        // println!("{}", self.opt_next_send_timer.is_none());
 
         if (self.pending_items.len() == 0) && self.opt_src_stream.is_none() {
             // We are done consuming all of self.src_streams items.
@@ -258,8 +260,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use self::tokio_core::reactor::Core;
-    use self::futures::{stream};
+    use self::futures::{stream, IntoFuture};
 
 
     #[test]
@@ -285,7 +288,56 @@ mod tests {
             core.run(keep_messages).unwrap();
         }
         assert_eq!(incoming_items, items);
+    }
 
+    #[test]
+    fn test_rate_limit_sink_different_rates() {
+        const MILLISECOND: u32 = 1_000_000;
+        const MAX_ITEM: u32 = 0x600;
+        let mut core = Core::new().unwrap();
+        let handle = core.handle();
+
+        let (sink, stream) = mpsc::channel::<u32>(0);
+
+        let rl_sink = rate_limit_sink(sink, 0x40, &handle).sink_map_err(|_| ());
+        // let rl_sink = sink.sink_map_err(|_| ());
+
+        let get_duration = |i| {
+            match i {
+                0x000 ... 0x200 => Duration::new(0,MILLISECOND/4),
+                0x200 ... 0x400 => Duration::new(0,MILLISECOND/1),
+                0x400 ... 0x600 => Duration::new(0,MILLISECOND/8),
+                _ => panic!("Out of range!"),
+            }
+        };
+
+        let chandle = handle.clone();
+
+        let send_stream = stream::iter_ok(0 .. MAX_ITEM)
+            .and_then(move |i: u32| {
+                      let cchandle = chandle.clone();
+                      let duration = get_duration(i);
+                      // println!("Creating a timeout object, duration = {:?}", duration);
+                      reactor::Timeout::new(get_duration(i), &cchandle)
+                          .into_future()
+                          .and_then(move |timeout| timeout.and_then(move |_| Ok(i)))
+                          .map_err(|_| ())
+            });
+
+        handle.spawn(rl_sink.send_all(send_stream).then(|_| Ok(())));
+
+        let mut incoming_items = Vec::new();
+
+        {
+            let keep_messages = stream.for_each(|item| {
+                incoming_items.push(item);
+                // println!("item = {}", item);
+                Ok(())
+            });
+
+            core.run(keep_messages).unwrap();
+        }
+        assert_eq!(incoming_items, (0 .. MAX_ITEM).collect::<Vec<u32>>());
     }
 }
 
