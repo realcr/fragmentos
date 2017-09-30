@@ -45,7 +45,7 @@ where
                    max_dgram_len, max_supported);
         }
 
-        let rate_limit_buffer = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
+        // let rate_limit_buffer = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
 
         FragMsgSender {
             send_sink, 
