@@ -12,10 +12,10 @@ use self::futures::{Future, Poll, Async, Sink, Stream, AsyncSink};
 use self::tokio_core::reactor;
 
 
-enum RateLimitFutureError<KE> {
+enum RateLimitFutureError<SKE> {
     SrcStreamError,
     TimeoutError(io::Error),
-    DestSinkError(KE),
+    DestSinkError(SKE),
     TimeoutCreationError(io::Error),
 }
 
@@ -25,9 +25,9 @@ const WAIT_ADJUST: u32 = MILLISECOND;
 const MAX_WAIT: u32 = 50 * MILLISECOND;
 const WAIT_RATE_ADJUST: u32 = 2*MAX_WAIT;
 
-struct RateLimitFuture<T,K,M,KE> {
-    dest_sink: K,
-    opt_src_stream: Option<M>,
+struct RateLimitFuture<T,SK,SM,SKE> {
+    dest_sink: SK,
+    opt_src_stream: Option<SM>,
     pending_items: VecDeque<T>,
     max_pending_items: usize,
     last_send: Instant,     // Last time a datagram was sent
@@ -36,15 +36,15 @@ struct RateLimitFuture<T,K,M,KE> {
     last_adjust_rate: Instant,
     adjust_rate_timer: reactor::Timeout,
     handle: reactor::Handle,
-    phantom_ke: PhantomData<KE>,
+    phantom_ske: PhantomData<SKE>,
 }
 
-impl<T,K,M,KE> RateLimitFuture<T,K,M,KE> 
+impl<T,SK,SM,SKE> RateLimitFuture<T,SK,SM,SKE> 
 where
-    K: Sink<SinkItem=T,SinkError=KE> + 'static,
-    M: Stream<Item=T,Error=()>,
+    SK: Sink<SinkItem=T,SinkError=SKE> + 'static,
+    SM: Stream<Item=T,Error=()>,
 {
-    fn new(dest_sink: K, src_stream: M, max_pending_items: usize, 
+    fn new(dest_sink: SK, src_stream: SM, max_pending_items: usize, 
            handle: &reactor::Handle) -> Self {
 
         let past_instant = Instant::now() - Duration::new(0,3*MAX_WAIT);
@@ -62,14 +62,14 @@ where
                 reactor::Timeout::new(Duration::new(0,WAIT_RATE_ADJUST), handle).unwrap(),
             handle: handle.clone(),
             // reactor::Timeout::new(Duration::new(0,MAX_WAIT), handle).unwrap(),
-            phantom_ke: PhantomData,
+            phantom_ske: PhantomData,
         }
     }
 
     /// Keep reading items from the source stream as long as we have
     /// enough room in self.pending_items
     /// If src_stream has no more items, opt_src_stream is set to be None.
-    fn read_items(&mut self) -> Result<(), RateLimitFutureError<KE>> {
+    fn read_items(&mut self) -> Result<(), RateLimitFutureError<SKE>> {
         while self.pending_items.len() < self.max_pending_items {
             match self.opt_src_stream.take() {
                 None => break,
@@ -101,7 +101,7 @@ where
     /// Reset the internal timer.
     /// If there are no pending items to be sent, timer is dropped.
     fn reset_next_send_timer(&mut self, cur_instant: Instant) 
-        -> Result<(), RateLimitFutureError<KE>> {
+        -> Result<(), RateLimitFutureError<SKE>> {
 
         if self.pending_items.len() == 0 {
             // We don't need a timer.
@@ -124,7 +124,7 @@ where
     }
 
     fn try_send_item(&mut self, cur_instant: Instant) 
-        -> Result<(), RateLimitFutureError<KE>> {
+        -> Result<(), RateLimitFutureError<SKE>> {
 
         match self.pending_items.pop_front() {
             Some(item) => {
@@ -150,7 +150,7 @@ where
     }
 
     fn reset_adjust_rate_timer(&mut self, cur_instant: Instant) 
-        -> Result<(), RateLimitFutureError<KE>> {
+        -> Result<(), RateLimitFutureError<SKE>> {
 
         self.adjust_rate_timer = match reactor::Timeout::new(
             Duration::new(0,WAIT_RATE_ADJUST), &self.handle) {
@@ -190,27 +190,27 @@ where
 
 }
 
-pub fn rate_limit_sink<T,K,KE>(dest_sink: K, max_pending_items: usize, 
+pub fn rate_limit_sink<T,SK,SKE>(dest_sink: SK, max_pending_items: usize, 
                              handle: &reactor::Handle) -> mpsc::Sender<T> 
 where
     T: 'static,
-    K: Sink<SinkItem=T,SinkError=KE> + 'static,
-    KE: 'static,
+    SK: Sink<SinkItem=T,SinkError=SKE> + 'static,
+    SKE: 'static,
 {
 
     let (sink, stream) = mpsc::channel::<T>(0);
     handle.spawn(RateLimitFuture::new(dest_sink, stream, max_pending_items, handle)
-                 .map_err(|e: RateLimitFutureError<KE>| ()));
+                 .map_err(|e: RateLimitFutureError<SKE>| ()));
     sink
 }
 
-impl<T,K,M,KE> Future for RateLimitFuture<T,K,M,KE> 
+impl<T,SK,SM,SKE> Future for RateLimitFuture<T,SK,SM,SKE> 
 where
-    K: Sink<SinkItem=T, SinkError=KE> + 'static,
-    M: Stream<Item=T,Error=()>,
+    SK: Sink<SinkItem=T, SinkError=SKE> + 'static,
+    SM: Stream<Item=T,Error=()>,
 {
     type Item = ();
-    type Error = RateLimitFutureError<KE>;
+    type Error = RateLimitFutureError<SKE>;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         // Get current time:
