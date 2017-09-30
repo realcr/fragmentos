@@ -13,7 +13,6 @@ use self::tokio_core::reactor;
 use ::messages::{max_supported_dgram_len, max_message, split_message, NONCE_LEN};
 use ::rate_limit_sink::rate_limit_sink;
 
-const RATE_LIMIT_BUFF_MULT: usize = 16;
 
 struct PendingDgrams<A> {
     address: A,
@@ -44,8 +43,6 @@ where
             panic!("max_dgram_len = {}, max_supported = {}", 
                    max_dgram_len, max_supported);
         }
-
-        // let rate_limit_buffer = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
 
         FragMsgSender {
             send_sink, 
