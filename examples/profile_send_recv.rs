@@ -13,8 +13,8 @@ use fragmentos::FragMsgSender;
 
 use self::tokio_core::reactor::Core;
 
-const NUM_MESSAGES: usize = 0x10;
-const MESSAGE_SIZE: usize = 1 << 14;
+const NUM_MESSAGES: usize = 0x100;
+const MESSAGE_SIZE: usize = 1 << 12;
 
 // A maximum size of underlying datagram:
 const MAX_DGRAM_LEN: usize = 200;
