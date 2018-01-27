@@ -54,7 +54,7 @@ fn main() {
         // Start a task to send all of our messages:
         handle.spawn(send_all.then(|_| Ok(())));
 
-        let keep_messages = frag_receiver.for_each(|(message, address)| {
+        let keep_messages = frag_receiver.for_each(|(_message, _address)| {
             num_incoming += 1;
             Ok(())
         });
