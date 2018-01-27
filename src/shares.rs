@@ -224,7 +224,11 @@ pub fn unite_data(data_shares: &[DataShare]) -> Result<Vec<u8>,()> {
 
 #[cfg(test)]
 mod tests {
+    extern crate rand;
+    extern crate test;
     use super::*;
+    use self::rand::{StdRng, Rng};
+    use self::test::Bencher;
 
     #[test]
     fn split_and_unite_block() {
@@ -250,6 +254,19 @@ mod tests {
             assert_eq!(my_data, &new_data[..]);
         }
 
+    }
+
+    #[bench]
+    fn bench_unite_data(bencher: &mut Bencher) {
+        let seed: &[_] = &[1,2,3,4,5];
+        let mut rng: StdRng = rand::SeedableRng::from_seed(seed);
+        let mut my_data = vec![0; 1024];
+        rng.fill_bytes(&mut my_data);
+
+        let b: usize = 3;
+        let data_shares = split_data(&my_data, b as u8).unwrap();
+
+        bencher.iter(|| unite_data(&data_shares[0 .. b]).unwrap());
     }
 
     /*
