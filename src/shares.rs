@@ -1,122 +1,8 @@
 extern crate gf256;
 
-// use self::gf256::Gf256;
-
 use reed_solomon_erasure;
 use reed_solomon_erasure::{ReedSolomon, option_shards_into_shards};
 
-/*
-#[derive(Debug)]
-struct Share {
-    input : u8, // Input to the polynomial
-    output: u8, // Output from the polynomial (at input)
-}
-
-/// Split a block of length b bytes into 2b - 1 shares.
-fn split_block(block: &[u8]) -> Result<Vec<Share>,()> {
-    let b = block.len();
-
-    // If block is empty, return error.
-    if b == 0 {
-        return Err(());
-    }
-
-    // We treat the block as a polynomial P of degree b - 1 with b coefficients.
-    // (Element block[0] is the most significant coefficient).
-    // We then calculate P(0), P(1), ... P(2b - 1)
-    // Every b points should be enough to reconstruct the original polynomial.
-    
-    // We are not able to split to more than 256 shares because we are using a field with 256
-    // elements (Gf256).
-    if (2*b - 1) > 256 {
-        return Err(());
-    }
-    
-    Ok((0 .. (2*b - 1) as u8)
-        .map(|x| {
-            let gf_x = Gf256::from_byte(x);
-            let mut gf_sum = Gf256::zero();
-
-            for i in 0 .. b {
-                gf_sum = gf_sum * gf_x;
-                gf_sum = gf_sum + Gf256::from_byte(block[i]);
-            }
-            Share{ 
-                input: x, 
-                output: gf_sum.to_byte(),
-            }
-        }).collect::<Vec<Share>>())
-}
-
-/// Unite a block given b shares.
-fn unite_block(shares: &[Share]) -> Result<Vec<u8>,()> {
-    let b = shares.len();
-
-    if (b == 0) || ((2*b - 1) > 256) {
-        // If b == 0 we have no shares to use.
-        // If 2*b - 1 > 256 there must be some shares that correspond to the same input, as there
-        // are only 256 elements in the field. We abort.
-        return Err(());
-    }
-
-    if b == 1 {
-        // Only one share means that we don't need to do any interpolation. 
-        // We just provide the share output back as a vector of one byte.
-        return Ok(vec![shares[0].output])
-    }
-
-    // Perform Lagrange interpolation to find out the coefficients of the original polynomial.
-    // We expect a polynomial of degree b - 1 (b coefficients).
-    
-    // Iterate over all monomials ( ...(x-x_j)... / ...(x_i-x_j)... ) * y_i
-    let mut res_poly = vec![Gf256::zero(); b];
-
-    for i in 0 .. b {
-        let mut cur_numerator = vec![Gf256::zero(); b];
-        cur_numerator[0] = Gf256::one();
-
-        // Iterate over multiplicands (x-x_j) in monomial:
-        for j in 0 .. b {
-            if j == i {
-                // In this monomial (x-x_i) will be missing:
-                continue
-            }
-
-            // Perform multiplication of (x-x_j) with current numerator.
-            for k in (1 .. (j + 1)).rev() {
-                cur_numerator[k] = cur_numerator[k] -
-                    Gf256::from_byte(shares[j].input) * cur_numerator[k-1];
-            }
-        }
-
-        // Calculate c_i := y_i / ( ... (x_i-x_j) ... )
-        let mut c = Gf256::from_byte(shares[i].output);
-        for j in 0 .. b {
-            if j == i {
-                continue
-            }
-            let diff = Gf256::from_byte(shares[i].input) - Gf256::from_byte(shares[j].input);
-            // We have two shares for the same input value. Aborting.
-            if diff == Gf256::zero() {
-                return Err(());
-            }
-            c = c / diff;
-        }
-
-
-        // Multiply the numerator polynomial by c_i, and add to the final total polynomial result:
-        for j in 0 .. b {
-            res_poly[j] = res_poly[j] + (cur_numerator[j] * c);
-        }
-    }
-
-    Ok(res_poly
-         .into_iter()
-         .map(|g_x| g_x.to_byte())
-         .collect::<Vec<u8>>()
-    )
-}
-*/
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct DataShare {
@@ -309,23 +195,5 @@ mod tests {
         bencher.iter(|| unite_data(&data_shares[0 .. b]).unwrap());
     }
 
-    /*
-    // This example is used in the fragmentos spec.
-    #[test]
-    fn test_example_split_message() {
-        let my_data = b"\x12\x34\x56\x78\x90\xab\xcd\xef\x55";
-        let b = 4;
-
-        let data_shares = split_data(my_data, b).unwrap();
-        for dshare in &data_shares {
-            print!("dshare.data = ");
-            for x in &dshare.data {
-                print!("{:02x} ", x);
-            }
-            println!();
-        }
-        assert!(false);
-    }
-    */
 
 }
