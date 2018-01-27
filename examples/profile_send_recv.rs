@@ -63,7 +63,6 @@ fn main() {
         core.run(keep_messages).unwrap();
     }
 
-    // Compare to original messages:
     assert_eq!(num_incoming, NUM_MESSAGES);
 
 }
