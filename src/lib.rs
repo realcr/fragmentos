@@ -19,10 +19,7 @@ pub use ::frag_msg_sender::FragMsgSender;
 pub use ::rate_limit_sink::rate_limit_sink;
 pub use ::messages::{max_supported_dgram_len, max_message};
 
+// For profiling:
+pub use ::shares::{split_data, unite_data};
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-    }
-}
+
