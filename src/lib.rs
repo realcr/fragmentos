@@ -5,6 +5,8 @@ extern crate arrayref;
 // #[macro_use]
 // extern crate tokio_core;
 
+extern crate reed_solomon_erasure;
+
 mod shares;
 mod messages;
 mod state_machine;
