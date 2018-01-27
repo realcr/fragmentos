@@ -186,10 +186,10 @@ mod tests {
     fn bench_unite_data(bencher: &mut Bencher) {
         let seed: &[_] = &[1,2,3,4,5];
         let mut rng: StdRng = rand::SeedableRng::from_seed(seed);
-        let mut my_data = vec![0; 1024];
+        let mut my_data = vec![0; 2500];
         rng.fill_bytes(&mut my_data);
 
-        let b: usize = 3;
+        let b: usize = 5;
         let data_shares = split_data(&my_data, b as u8).unwrap();
 
         bencher.iter(|| unite_data(&data_shares[0 .. b]).unwrap());
