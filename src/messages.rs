@@ -91,7 +91,11 @@ pub fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_dgram_len: usize)
     }
 
     let message_id = calc_message_id(&t)?;
-    let data_shares = split_data(&t, b as u8)?;
+    let data_shares = match split_data(&t, b as u8) {
+        Ok(data_shares) => data_shares,
+        // TODO: Fix error handling here:
+        Err(_) => return Err(()),
+    };
     let enc =  Encoder::new(ECC_LEN);
 
 
@@ -120,7 +124,11 @@ pub fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare
         return Err(());
     }
 
-    let t = unite_data(data_shares)?;
+    let t = match unite_data(data_shares) {
+        Ok(data) => data,
+        // TODO: Fix error handling here:
+        Err(_) => return Err(()),
+    };
 
     // Make sure that the provided message_id matches the calculated message_id:
     let c_message_id = calc_message_id(&t)?;

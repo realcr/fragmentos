@@ -1,7 +1,11 @@
 extern crate gf256;
 
-use self::gf256::Gf256;
+// use self::gf256::Gf256;
 
+use reed_solomon_erasure;
+use reed_solomon_erasure::{ReedSolomon, option_shards_into_shards};
+
+/*
 #[derive(Debug)]
 struct Share {
     input : u8, // Input to the polynomial
@@ -112,6 +116,7 @@ fn unite_block(shares: &[Share]) -> Result<Vec<u8>,()> {
          .collect::<Vec<u8>>()
     )
 }
+*/
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct DataShare {
@@ -120,102 +125,135 @@ pub struct DataShare {
 }
 
 
-/// Split data to 2b - 1 blocks, where every b can reconstruct the original data.
+#[derive(Debug)]
+pub enum SplitDataError {
+    NumBlocksIsZero,
+    NumBlocksTooLarge,
+    ReedSolomonInitFailed(reed_solomon_erasure::Error),
+    ReedSolomonEncodeFailed(reed_solomon_erasure::Error),
+}
+
+
+/// Split data to 2b - 1 blocks, where every b blocks can reconstruct the original data.
 /// (2*b - 1) must be smaller or equal to 256.
-pub fn split_data(data: &[u8], b: u8) -> Result<Vec<DataShare>,()> {
-    let block_size: usize = b as usize;
+pub fn split_data(data: &[u8], b: u8) -> Result<Vec<DataShare>,SplitDataError> {
+    let num_blocks = b as usize;
 
-    if block_size == 0 {
-        return Err(());
+    if num_blocks == 0 {
+        return Err(SplitDataError::NumBlocksIsZero);
     }
 
-    if 2*block_size - 1 > 256 {
-        return Err(());
-    }
-    
-    // We divide the data into blocks.
-    // If not exactly divisible by block size, we add extra 0 padding bytes.
-    // let num_blocks = (data.len() + (block_size - 1)) / block_size;
-
-    let mut data_shares = Vec::new();
-    for i in 0 .. (2*b - 1) {
-        data_shares.push(DataShare {
-            input: i,
-            data: Vec::new(),
-        });
+    if 2*num_blocks - 1 > 256 {
+        return Err(SplitDataError::NumBlocksTooLarge);
     }
 
-    {
-        let mut process_block = |block: &[u8]| -> Result<(),()> {
-            let shares = split_block(block)?; 
+    if num_blocks == 1 {
+        return Ok(vec![DataShare {
+            input: 0,
+            data: data.to_vec(),
+        }])
+    }
 
-            for share in &shares {
-                assert!(data_shares[share.input as usize].input == share.input);
-                data_shares[share.input as usize].data.push(share.output);
+    // Special case of just one block. We don't need to use reed-solomon encoder.
+    // Note that we will get an error if we try to use the 
+    // reed solomon encoder with amount of parity shards = 0
+    let reed_solomon = match ReedSolomon::new(num_blocks, num_blocks - 1) {
+        Ok(reed_solomon) => reed_solomon,
+        Err(e) => return Err(SplitDataError::ReedSolomonInitFailed(e)),
+    };
+
+    let block_size = (data.len() + (num_blocks - 1)) / num_blocks;
+
+    // Add zero padding in case block_size is not a divisor of data.len():
+    let padding_len = num_blocks * block_size - data.len();
+    debug_assert!(padding_len < block_size);
+
+    let mut cdata = data.to_vec();
+    for _ in 0 .. padding_len {
+        cdata.push(0);
+    }
+
+    let mut shards: Vec<Box<[u8]>> = Vec::new();
+
+    for i in 0 .. num_blocks {
+        let cur_shard = cdata[i*block_size .. (i+1)*block_size].to_vec();
+        debug_assert!(cur_shard.len() == block_size);
+        shards.push(cur_shard.into_boxed_slice());
+    }
+
+    // Add extra num_blocks - 1 empty shards to be used for encoding:
+    for _ in 0 .. num_blocks - 1 {
+        shards.push(vec![0u8; block_size].into_boxed_slice());
+    }
+
+    match reed_solomon.encode_shards(&mut shards) {
+        Ok(()) => {},
+        Err(e) => return Err(SplitDataError::ReedSolomonEncodeFailed(e)),
+    };
+
+    Ok(shards
+        .into_iter()
+        .enumerate()
+        .map(|(i, shard)| {
+            DataShare {
+                input: i as u8,
+                data: shard.to_vec(),
             }
-            Ok(())
-        };
+        }).collect::<Vec<DataShare>>())
+}
 
-
-        for i in 0 .. (data.len() / block_size) {
-            process_block(&data[i*block_size .. (i+1)*block_size])?;
-        }
-
-        // Deal with possible left bytes (Because block_size does not 
-        // divide data.len()):
-        
-        let left_bytes = data.len() - block_size * (data.len() / block_size);
-        if left_bytes > 0 {
-            let mut last_block = data[
-                    block_size * (data.len() / block_size) ..
-                    data.len() ].to_vec();
-
-            assert_eq!(last_block.len(), left_bytes);
-
-            // Add padding bytes:
-            for _ in 0 .. (block_size - left_bytes) {
-                last_block.push(0);
-            }
-            assert_eq!(last_block.len(), block_size);
-            process_block(&last_block)?;
-        }
-    }
-
-    Ok(data_shares)
+#[derive(Debug)]
+pub enum UniteDataError {
+    NumBlocksIsZero,
+    NumBlocksTooLarge,
+    ReedSolomonInitFailed(reed_solomon_erasure::Error),
+    ReedSolomonDecodeFailed(reed_solomon_erasure::Error),
 }
 
 /// Reconstruct original data using given b data shares
 /// Reconstructed data might contain trailing zero padding bytes.
-pub fn unite_data(data_shares: &[DataShare]) -> Result<Vec<u8>,()> {
-    let block_size = data_shares.len();
+pub fn unite_data(data_shares: &[DataShare]) -> Result<Vec<u8>,UniteDataError> {
 
-    if block_size == 0 {
-        return Err(());
+    let num_blocks = data_shares.len();
+
+    if num_blocks == 0 {
+        return Err(UniteDataError::NumBlocksIsZero);
     }
 
     // Limit due to the amount of elements in the field.
-    if (2 * block_size - 1) > 256 {
-        return Err(());
+    if (2 * num_blocks - 1) > 256 {
+        return Err(UniteDataError::NumBlocksTooLarge);
     }
 
-    // Make sure that all the data shares are of the same size:
-    for i in 0 .. data_shares.len() - 1 {
-        if data_shares[i].data.len() != data_shares[i+1].data.len() {
-            return Err(());
-        }
+    // Special case of just one block. We don't need to use reed-solomon decoder.
+    if num_blocks == 1 {
+        return Ok(data_shares[0].data.clone());
     }
 
-    let mut res_data = Vec::<u8>::new();
+    let reed_solomon = match ReedSolomon::new(num_blocks, num_blocks - 1) {
+        Ok(reed_solomon) => reed_solomon,
+        Err(e) => return Err(UniteDataError::ReedSolomonInitFailed(e)),
+    };
 
-    for i in 0 .. data_shares[0].data.len() {
-        let shares = (0 .. data_shares.len())
-            .map(|j| Share{
-                input: data_shares[j].input,
-                output: data_shares[j].data[i],
-            }).collect::<Vec<Share>>();
+    // Convert data_shares into shards format:
+    let mut option_shards: Vec<Option<Box<[u8]>>> = vec![None; 2*num_blocks - 1];
+    for data_share in data_shares {
+        let cloned_share_data = data_share.data.clone();
+        option_shards[data_share.input as usize] = Some(cloned_share_data.into_boxed_slice());
+    }
 
-        let block = unite_block(&shares)?;
-        res_data.extend_from_slice(&block);
+    match reed_solomon.reconstruct_shards(&mut option_shards) {
+        Ok(()) => {},
+        Err(e) => return Err(UniteDataError::ReedSolomonDecodeFailed(e)),
+    };
+
+
+    let shards = option_shards_into_shards(option_shards);
+
+    // Reconstruct original data (Possibly with trailing zero padding):
+    let mut res_data = Vec::new();
+    for i in 0 .. num_blocks {
+        res_data.extend_from_slice(&shards[i]);
     }
 
     Ok(res_data)
@@ -230,6 +268,7 @@ mod tests {
     use self::rand::{StdRng, Rng};
     use self::test::Bencher;
 
+    /*
     #[test]
     fn split_and_unite_block() {
         let orig_block: &[u8] = &[1,2,3,4,5,6,7];
@@ -237,6 +276,7 @@ mod tests {
         let new_block = unite_block(&shares[0 .. orig_block.len()]).unwrap();
         assert_eq!(orig_block, &new_block[..]);
     }
+    */
 
     #[test]
     fn split_unite_data() {
