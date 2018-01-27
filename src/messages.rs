@@ -160,7 +160,11 @@ pub fn correct_frag_message(frag_message: &[u8]) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    extern crate rand;
+    extern crate test;
     use super::*;
+    use self::rand::{StdRng, Rng};
+    use self::test::Bencher;
 
     #[test]
     fn test_max_message() {
@@ -215,5 +219,28 @@ mod tests {
 
         let corrected = correct_frag_message(&mut frags[0]).unwrap();
         assert_eq!(corrected, orig_frag0);
+    }
+
+    #[bench]
+    fn bench_unite_message(bencher: &mut Bencher) {
+        let seed: &[_] = &[1,2,3,4,5];
+        let mut rng: StdRng = rand::SeedableRng::from_seed(seed);
+        let mut orig_message = vec![0; 4096];
+        rng.fill_bytes(&mut orig_message);
+
+        let frags = split_message(&orig_message, 
+                                  b"nonce123", 200).unwrap();
+        let frag_len = frags[0].len();
+        assert!(frags.len() > 1);
+
+        let message_id = array_ref![&frags[0],0,MESSAGE_ID_LEN];
+        let b = frags[0][MESSAGE_ID_LEN];
+
+        let data_shares = &(0 .. b).map(|i| DataShare {
+            input: i, 
+            data: (&frags[i as usize][MESSAGE_ID_LEN + 1 + 1 .. frag_len - ECC_LEN]).to_vec()
+        }).collect::<Vec<DataShare>>();
+
+        bencher.iter(|| unite_message(message_id, &data_shares[0 .. b as usize]).unwrap());
     }
 }
