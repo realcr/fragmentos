@@ -10,7 +10,6 @@ rand = "0.3.16"
 arrayref = "0.3.4"
 rust-crypto = "0.2.36"
 reed-solomon = "0.1.6"
-gf256 = { git = "https://github.com/realcr/rs-gf256" }
 reed-solomon-erasure = {version = "2.3", features = ["pure-rust"] }
 
 futures = "0.1.15"

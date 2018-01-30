@@ -1,4 +1,3 @@
-extern crate gf256;
 
 use reed_solomon_erasure;
 use reed_solomon_erasure::{ReedSolomon, option_shards_into_shards};
