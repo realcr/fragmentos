@@ -96,7 +96,7 @@ pub enum UniteDataError {
 
 /// Reconstruct original data using given b data shares
 /// Reconstructed data might contain trailing zero padding bytes.
-pub fn unite_data(data_shares: &[DataShare]) -> Result<Vec<u8>,UniteDataError> {
+pub fn unite_data(data_shares: &[DataShare]) -> Result<Vec<u8>, UniteDataError> {
 
     let num_blocks = data_shares.len();
 
