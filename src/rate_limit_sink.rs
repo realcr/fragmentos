@@ -190,7 +190,7 @@ where
     /// Adjust the time to wait between sending two messages.
     fn adjust_rate(&mut self) {
 
-        println!("self.wait_nano = {}", self.wait_nano);
+        // println!("self.wait_nano = {}", self.wait_nano);
 
         // We need to adjust rate:
         // Possibly adjust rate limit, according to how many messages are pending:
