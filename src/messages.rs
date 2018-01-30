@@ -1,6 +1,5 @@
 use reed_solomon::{Encoder, Decoder};
-use crypto::sha2::Sha256;
-use crypto::digest::Digest;
+use ring::digest::{digest, SHA512_256};
 
 use shares::{split_data, unite_data, DataShare};
 
@@ -11,7 +10,7 @@ Fragmentos message:
 - b                 [1 byte]
 - shareIndex        [1 byte]
 - shareData         [variable amount of bytes]
-- errorCorrection   [8 bytes]
+- shortHash         [8 bytes]   (First 8 bytes of Sha512/256)
 
 `T := nonce8 || paddingCount || M || padding`
 */
@@ -40,20 +39,12 @@ pub fn max_message(max_dgram_len: usize) -> Result<usize,()> {
 }
 
 /// Calculate a hash of T, to obtain messageId.
-pub fn calc_message_id(t: &[u8]) -> Result<Vec<u8>,()> {
-    let mut hasher = Sha256::new();
-    let output_len = hasher.output_bytes();
-    if output_len < MESSAGE_ID_LEN {
-        // The hash output be at least as long as message_id.
-        return Err(());
-    }
-    let mut sha256_hash = vec![0; output_len];
-    hasher.input(&t);
-    hasher.result(&mut sha256_hash);
+pub fn calc_message_id(t: &[u8]) -> [u8; MESSAGE_ID_LEN] {
 
-    // Take only the part we care about:
-    sha256_hash.truncate(MESSAGE_ID_LEN);
-    Ok(sha256_hash)
+    let mut message_id = [0x0; MESSAGE_ID_LEN];
+    let digest_res = digest(&SHA512_256, t);
+    message_id.copy_from_slice(&digest_res.as_ref()[0 .. MESSAGE_ID_LEN]);
+    message_id
 }
 
 /// Split a message m into a few Fragmentos messages, to be sent to the destination.
@@ -87,7 +78,7 @@ pub fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_dgram_len: usize)
         t.push(0);
     }
 
-    let message_id = calc_message_id(&t)?;
+    let message_id = calc_message_id(&t);
     let data_shares = match split_data(&t, b as u8) {
         Ok(data_shares) => data_shares,
         // TODO: Fix error handling here:
@@ -128,7 +119,7 @@ pub fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare
     };
 
     // Make sure that the provided message_id matches the calculated message_id:
-    let c_message_id = calc_message_id(&t)?;
+    let c_message_id = calc_message_id(&t);
     if message_id != &c_message_id[..] {
         return Err(());
     }
@@ -179,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_calc_message_id() {
-        calc_message_id(b"Dummy T message").unwrap();
+        calc_message_id(b"Dummy T message");
     }
 
     #[test]

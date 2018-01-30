@@ -10,7 +10,7 @@ extern crate reed_solomon;
 extern crate futures;
 extern crate tokio_core;
 extern crate rand;
-extern crate crypto;
+extern crate ring;
 
 // TODO: How to make sure this only compiles in dev?
 extern crate test;
