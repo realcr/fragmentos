@@ -1,4 +1,3 @@
-
 use reed_solomon_erasure;
 use reed_solomon_erasure::{ReedSolomon, option_shards_into_shards};
 
@@ -147,11 +146,10 @@ pub fn unite_data(data_shares: &[DataShare]) -> Result<Vec<u8>,UniteDataError> {
 
 #[cfg(test)]
 mod tests {
-    extern crate rand;
-    extern crate test;
     use super::*;
-    use self::rand::{StdRng, Rng};
-    use self::test::Bencher;
+    use rand;
+    use rand::{StdRng, Rng};
+    use test::Bencher;
 
     /*
     #[test]

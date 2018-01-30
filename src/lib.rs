@@ -6,6 +6,14 @@ extern crate arrayref;
 // extern crate tokio_core;
 
 extern crate reed_solomon_erasure;
+extern crate reed_solomon;
+extern crate futures;
+extern crate tokio_core;
+extern crate rand;
+extern crate crypto;
+
+// TODO: How to make sure this only compiles in dev?
+extern crate test;
 
 mod shares;
 mod messages;

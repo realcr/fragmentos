@@ -1,9 +1,6 @@
-extern crate crypto;
-extern crate reed_solomon;
-
-use self::reed_solomon::{Encoder, Decoder};
-use self::crypto::sha2::Sha256;
-use self::crypto::digest::Digest;
+use reed_solomon::{Encoder, Decoder};
+use crypto::sha2::Sha256;
+use crypto::digest::Digest;
 
 use shares::{split_data, unite_data, DataShare};
 
@@ -168,11 +165,10 @@ pub fn correct_frag_message(frag_message: &[u8]) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    extern crate rand;
-    extern crate test;
     use super::*;
-    use self::rand::{StdRng, Rng};
-    use self::test::Bencher;
+    use rand;
+    use rand::{StdRng, Rng};
+    use test::Bencher;
 
     #[test]
     fn test_max_message() {

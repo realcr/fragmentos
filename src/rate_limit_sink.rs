@@ -1,6 +1,3 @@
-extern crate futures;
-extern crate tokio_core;
-
 use std::io;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -8,9 +5,9 @@ use std::time::{Duration, Instant};
 use std::fmt;
 use std::marker::PhantomData;
 
-use self::futures::sync::mpsc;
-use self::futures::{Future, Poll, Async, Sink, Stream, AsyncSink};
-use self::tokio_core::reactor;
+use futures::sync::mpsc;
+use futures::{Future, Poll, Async, Sink, Stream, AsyncSink};
+use tokio_core::reactor;
 
 
 enum RateLimitFutureError<SKE> {
@@ -270,8 +267,8 @@ where
 mod tests {
     use super::*;
     use std::collections::VecDeque;
-    use self::tokio_core::reactor::Core;
-    use self::futures::{stream, IntoFuture};
+    use tokio_core::reactor::Core;
+    use futures::{stream, IntoFuture};
 
 
     #[test]

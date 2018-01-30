@@ -1,14 +1,10 @@
-extern crate futures;
-extern crate tokio_core;
-extern crate rand;
-
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
-use self::futures::{Sink, Poll, StartSend, AsyncSink};
-use self::futures::sync::mpsc;
-use self::rand::Rng;
-use self::tokio_core::reactor;
+use futures::{Stream, Sink, Poll, StartSend, AsyncSink};
+use futures::sync::mpsc;
+use rand::Rng;
+use tokio_core::reactor;
 
 use ::messages::{max_supported_dgram_len, max_message, split_message, NONCE_LEN};
 use ::rate_limit_sink::rate_limit_sink;
@@ -128,14 +124,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    extern crate tokio_core;
-
     use super::*;
     use std::time::{Instant, Duration};
 
-    use self::rand::{StdRng, Rng};
-    use self::tokio_core::reactor::Core;
-    use self::futures::{Async, Future, Stream};
+    use rand;
+    use rand::{StdRng, Rng};
+    use tokio_core::reactor::Core;
+    use futures::{Async, Future, Stream};
 
     use ::state_machine::FragStateMachine;
 

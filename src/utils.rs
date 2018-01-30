@@ -1,8 +1,6 @@
-extern crate tokio_core;
-
 use std::io;
 use std::net::SocketAddr;
-use self::tokio_core::net::{UdpCodec};
+use tokio_core::net::{UdpCodec};
 
 pub struct DgramCodec;
 

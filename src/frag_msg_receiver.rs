@@ -1,9 +1,7 @@
-extern crate futures;
-
 use std::time::Instant;
 use std::marker::PhantomData;
 
-use self::futures::{Stream, Poll, Async};
+use futures::{Stream, Poll, Async};
 
 use ::state_machine::{FragStateMachine};
 
@@ -90,14 +88,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    extern crate futures;
-    extern crate tokio_core;
-
     use super::*;
     use std::time::{Instant, Duration};
     use std::collections::VecDeque;
-    use self::futures::{stream, Future};
-    use self::tokio_core::reactor::Core;
+    use futures::{stream, Future};
+    use tokio_core::reactor::Core;
 
     use ::messages::{split_message};
 
