@@ -26,10 +26,6 @@ pub const NONCE_LEN: usize = 8;
 const FIELDS_LEN: usize = MESSAGE_ID_LEN + 1 + 1 + ECC_LEN;
 
 
-pub fn max_supported_dgram_len() -> usize {
-    255 - FIELDS_LEN
-}
-
 /// Calculate max possible message for Fragmentos, given the maximum datagram allowed on the
 /// underlying protocol.
 pub fn max_message(max_dgram_len: usize) -> Result<usize,()> {
@@ -60,10 +56,6 @@ pub fn calc_message_id(t: &[u8]) -> [u8; MESSAGE_ID_LEN] {
 /// Returns a list of Fragmentos messages (As vectors) to be sent to the remote side.
 pub fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_dgram_len: usize) 
         -> Result<Vec<Vec<u8>>,()> {
-
-    if max_dgram_len > max_supported_dgram_len() {
-        return Err(());
-    }
 
     if m.len() > max_message(max_dgram_len)? {
         return Err(());

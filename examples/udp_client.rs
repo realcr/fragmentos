@@ -23,7 +23,7 @@ use tokio_core::reactor;
 use tokio_core::reactor::Core;
 
 use fragmentos::{FragMsgReceiver, FragMsgSender, 
-    rate_limit_sink, max_supported_dgram_len, max_message};
+    rate_limit_sink, max_message};
 use fragmentos::utils::DgramCodec;
 
 // Multiplier for the calculation of rate limit buffer:
@@ -140,7 +140,7 @@ where
 
 fn main() {
 
-    let max_dgram_len = std::cmp::min(max_supported_dgram_len(), UDP_MAX_DGRAM);
+    let max_dgram_len = UDP_MAX_DGRAM;
     if MAX_FRAG_MSG_LEN < 8 {
         panic!("MAX_FRAG_MSG_LEN is lower than 8!");
     }

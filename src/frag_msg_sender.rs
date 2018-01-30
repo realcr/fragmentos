@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use futures::{Sink, Poll, StartSend, AsyncSink};
 use rand::Rng;
 
-use ::messages::{max_supported_dgram_len, split_message, NONCE_LEN};
+use ::messages::{split_message, NONCE_LEN};
 
 
 struct PendingDgrams<A> {
@@ -31,11 +31,6 @@ where
     pub fn new(send_sink: SK, max_dgram_len: usize, rng: R) -> Self {
         // Make sure that max_dgram_len is not too large,
         // Due to Reed Solomon usage of GF256 constraint.
-        let max_supported = max_supported_dgram_len();
-        if max_dgram_len > max_supported {
-            panic!("max_dgram_len = {}, max_supported = {}", 
-                   max_dgram_len, max_supported);
-        }
 
         FragMsgSender {
             send_sink, 

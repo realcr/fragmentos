@@ -13,7 +13,7 @@ use futures::{Stream, Sink};
 use tokio_core::net::{UdpSocket};
 use tokio_core::reactor::Core;
 
-use fragmentos::{FragMsgReceiver, FragMsgSender, max_supported_dgram_len, 
+use fragmentos::{FragMsgReceiver, FragMsgSender, 
     max_message, rate_limit_sink};
 use fragmentos::utils::DgramCodec;
 
@@ -42,7 +42,7 @@ fn main() {
     let dgram_codec = DgramCodec;
     let (sink, stream) = socket.framed(dgram_codec).split();
 
-    let max_dgram_len = std::cmp::min(max_supported_dgram_len(), UDP_MAX_DGRAM);
+    let max_dgram_len = UDP_MAX_DGRAM;
 
     let rate_limit_buffer = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
     let rl_sink = rate_limit_sink(sink, rate_limit_buffer, &handle);
