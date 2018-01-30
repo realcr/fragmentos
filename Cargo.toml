@@ -8,7 +8,6 @@ authors = ["real"]
 rand = "0.3.16"
 arrayref = "0.3.4"
 ring = "0.12.1"
-reed-solomon = "0.1.6"
 reed-solomon-erasure = {version = "2.3", features = ["pure-rust"] }
 
 futures = "0.1.15"

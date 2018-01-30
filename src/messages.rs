@@ -1,10 +1,9 @@
-use reed_solomon::{Encoder, Decoder};
 use ring::digest::{digest, SHA512_256};
 
 use shares::{split_data, unite_data, DataShare};
 
 /*
-Fragmentos message:
+Fragmentos message fragment:
 
 - messageId         [8 bytes]
 - b                 [1 byte]
@@ -15,14 +14,17 @@ Fragmentos message:
 `T := nonce8 || paddingCount || M || padding`
 */
 
+// Length of the short_hash function output.
+const SHORT_HASH_LEN: usize = 8;
 // Length of messageId (First 8 bytes of sha256 of the underlying T data):
-pub const MESSAGE_ID_LEN: usize = 8;
+pub const MESSAGE_ID_LEN: usize = SHORT_HASH_LEN;
 // Length in bytes of the Reed Solomon error correcting code:
 pub const ECC_LEN: usize = 8;
 // Length in bytes of nonce in the beginning of the underlying T data:
 pub const NONCE_LEN: usize = 8;
 // Length of all message fields, excluding shareData:
 const FIELDS_LEN: usize = MESSAGE_ID_LEN + 1 + 1 + ECC_LEN;
+
 
 pub fn max_supported_dgram_len() -> usize {
     255 - FIELDS_LEN
@@ -38,14 +40,20 @@ pub fn max_message(max_dgram_len: usize) -> Result<usize,()> {
     Ok((128 * (max_dgram_len - FIELDS_LEN)) - (NONCE_LEN + 1))
 }
 
+fn short_hash(input_data: &[u8]) -> [u8; SHORT_HASH_LEN] {
+    let mut hash_output = [0x0; SHORT_HASH_LEN];
+    let digest_res = digest(&SHA512_256, input_data);
+    hash_output.copy_from_slice(&digest_res.as_ref()[0 .. MESSAGE_ID_LEN]);
+    hash_output
+}
+
+
+/*
 /// Calculate a hash of T, to obtain messageId.
 pub fn calc_message_id(t: &[u8]) -> [u8; MESSAGE_ID_LEN] {
-
-    let mut message_id = [0x0; MESSAGE_ID_LEN];
-    let digest_res = digest(&SHA512_256, t);
-    message_id.copy_from_slice(&digest_res.as_ref()[0 .. MESSAGE_ID_LEN]);
-    message_id
+    short_hash(t)
 }
+*/
 
 /// Split a message m into a few Fragmentos messages, to be sent to the destination.
 /// Could fail if message is too large.
@@ -78,14 +86,12 @@ pub fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_dgram_len: usize)
         t.push(0);
     }
 
-    let message_id = calc_message_id(&t);
+    let message_id = short_hash(&t);
     let data_shares = match split_data(&t, b as u8) {
         Ok(data_shares) => data_shares,
         // TODO: Fix error handling here:
         Err(_) => return Err(()),
     };
-    let enc =  Encoder::new(ECC_LEN);
-
 
     Ok(data_shares
         .into_iter()
@@ -96,8 +102,8 @@ pub fn split_message(m: &[u8], nonce: &[u8; NONCE_LEN], max_dgram_len: usize)
             fmessage.push(b as u8);
             fmessage.push(i as u8);
             fmessage.extend_from_slice(&data_share.data);
-            let encoded = enc.encode(&fmessage);
-            fmessage.extend_from_slice(encoded.ecc());
+            let frag_hash = short_hash(&fmessage);
+            fmessage.extend_from_slice(&frag_hash);
             fmessage
         }).collect::<Vec<Vec<u8>>>()
     )
@@ -119,7 +125,7 @@ pub fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare
     };
 
     // Make sure that the provided message_id matches the calculated message_id:
-    let c_message_id = calc_message_id(&t);
+    let c_message_id = short_hash(&t);
     if message_id != &c_message_id[..] {
         return Err(());
     }
@@ -134,22 +140,13 @@ pub fn unite_message(message_id: &[u8; MESSAGE_ID_LEN], data_shares: &[DataShare
 /// Read a fragmentos message and possibly correct it using the given error correction code.
 /// If the message is valid, doesn't change the message and returns true.
 /// If correction occurred and succeeded, return true. Otherwise, return false.
-pub fn correct_frag_message(frag_message: &[u8]) -> Option<Vec<u8>> {
-    let dec = Decoder::new(ECC_LEN);
-    if !dec.is_corrupted(&frag_message) {
-        // Message is not corrupted, we have nothing to do.
-        return Some(frag_message.to_vec())
-    }
-
-    // We are here if the message is corrupted. We try to fix it:
-    // TODO: Remove the clone here in the next version of reed-solomon.
-    // frag_message doesn't need to be mutable.
-    match dec.correct(&mut frag_message.to_vec(), None) {
-        Ok(recovered) => {
-            // message corrected successfuly
-            Some((*recovered).to_vec())
-        },      
-        Err(_) => None,    // could not correct message
+pub fn verify_frag_message(frag_message: &[u8]) -> bool {
+    if frag_message.len() < SHORT_HASH_LEN {
+        false
+    } else {
+        let hashed_content = &frag_message[ .. frag_message.len() - SHORT_HASH_LEN];
+        let hash_output = short_hash(hashed_content);
+        &hash_output == &frag_message[frag_message.len() - SHORT_HASH_LEN .. ]
     }
 }
 
@@ -170,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_calc_message_id() {
-        calc_message_id(b"Dummy T message");
+        short_hash(b"Dummy T message");
     }
 
     #[test]
@@ -199,21 +196,20 @@ mod tests {
     }
 
     #[test]
-    fn test_correct_frag_message() {
+    fn test_verify_frag_message() {
         let orig_message = b"This is some message to be split";
         let mut frags = split_message(orig_message, 
                                   b"nonce123", 22).unwrap();
 
-        let orig_frag0 = frags[0].to_vec();
+        // frags[0] should be valid:
+        assert!(verify_frag_message(&frags[0]));
 
-        // Make at most ECC_LEN/2 changes to fragment 0:
+        // Make some changes to fragment 0, so that verification will fail:
         frags[0][5] = 0x41;
         frags[0][6] = 0x32;
         frags[0][7] = 0xfe;
         frags[0][10] = 0x29;
-
-        let corrected = correct_frag_message(&mut frags[0]).unwrap();
-        assert_eq!(corrected, orig_frag0);
+        assert!(!verify_frag_message(&frags[0]));
     }
 
     #[bench]

@@ -3,7 +3,7 @@ use std::collections::{HashMap};
 
 use ::shares::{DataShare};
 use ::messages::{MESSAGE_ID_LEN, ECC_LEN,
-    unite_message, correct_frag_message};
+    unite_message, verify_frag_message};
 
 const MESSAGE_ID_TIMEOUT: u64 = 30;
 
@@ -43,12 +43,12 @@ impl FragStateMachine {
                              cur_instant: Instant) -> Option<Vec<u8>> {
 
         // Use the error correcting code to try to correct the error if possible.
-        let corrected = match correct_frag_message(frag_message) {
-            Some(corrected) => corrected,
-            None => {return None;},
+        match verify_frag_message(frag_message) {
+            true => {},
+            false => {return None},
         };
 
-        let message_id = array_ref![corrected, 0, MESSAGE_ID_LEN];
+        let message_id = array_ref![frag_message, 0, MESSAGE_ID_LEN];
 
         if self.used_message_ids.contains_key(message_id) {
             // Refresh message_id entry inside used_message_ids:
