@@ -13,11 +13,11 @@ use fragmentos::FragMsgSender;
 
 use self::tokio_core::reactor::Core;
 
-const NUM_MESSAGES: usize = 0x100;
+const NUM_MESSAGES: usize = 0x400;
 const MESSAGE_SIZE: usize = 1 << 12;
 
 // A maximum size of underlying datagram:
-const MAX_DGRAM_LEN: usize = 200;
+const MAX_DGRAM_LEN: usize = 500;
 
 fn main() {
     let get_cur_instant = || Instant::now();
