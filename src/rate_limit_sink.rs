@@ -266,7 +266,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::VecDeque;
     use tokio_core::reactor::Core;
     use futures::{stream, IntoFuture};
 
@@ -322,7 +321,7 @@ mod tests {
         let send_stream = stream::iter_ok(0 .. MAX_ITEM)
             .and_then(move |i: u32| {
                       let cchandle = chandle.clone();
-                      let duration = get_duration(i);
+                      // let duration = get_duration(i);
                       // println!("Creating a timeout object, duration = {:?}", duration);
                       reactor::Timeout::new(get_duration(i), &cchandle)
                           .into_future()

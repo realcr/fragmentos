@@ -1,13 +1,10 @@
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
-use futures::{Stream, Sink, Poll, StartSend, AsyncSink};
-use futures::sync::mpsc;
+use futures::{Sink, Poll, StartSend, AsyncSink};
 use rand::Rng;
-use tokio_core::reactor;
 
-use ::messages::{max_supported_dgram_len, max_message, split_message, NONCE_LEN};
-use ::rate_limit_sink::rate_limit_sink;
+use ::messages::{max_supported_dgram_len, split_message, NONCE_LEN};
 
 
 struct PendingDgrams<A> {
@@ -50,10 +47,12 @@ where
         }
     }
 
+    /*
     /// Get the original inner send_sink
     fn into_inner(self) -> SK {
         self.send_sink
     }
+    */
 }
 
 impl<A,R,SK,SKE> Sink for FragMsgSender<A,R,SK,SKE>
@@ -128,9 +127,10 @@ mod tests {
     use std::time::{Instant, Duration};
 
     use rand;
-    use rand::{StdRng, Rng};
+    use rand::{StdRng};
     use tokio_core::reactor::Core;
-    use futures::{Async, Future, Stream};
+    use futures::{Future, Stream};
+    use futures::sync::mpsc;
 
     use ::state_machine::FragStateMachine;
 
