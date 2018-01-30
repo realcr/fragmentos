@@ -54,7 +54,7 @@ struct Collector<S> {
 impl<S> Collector<S> {
     /// Process a message. Returns true if we should stop waiting for messages.
     fn process_msg(&mut self, msg: Vec<u8>) -> bool {
-        // println!("self.received_ids.len() = {}",self.received_ids.len());
+        println!("self.received_ids.len() = {}",self.received_ids.len());
         match get_msg_id(&msg) {
             None => {
                 self.num_invalid += 1;
