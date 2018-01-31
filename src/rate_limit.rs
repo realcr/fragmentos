@@ -212,6 +212,9 @@ impl<T> Future for RateLimitTask<T> {
             },
             Err(e) => Err(RateLimitTaskError::AdjustableIntervalFailure(e)),
         }
+
+        // TODO: Missing here a poll that reads from inner_sender into self.pending_items.
+        // Should not be polled if self.pending_items is full.
     }
 
 }
