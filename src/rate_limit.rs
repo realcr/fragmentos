@@ -1,6 +1,7 @@
 use std::time::{Duration};
 use std::io;
 use std::rc::Rc;
+use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use futures::sync::mpsc;
@@ -74,7 +75,7 @@ impl Stream for AdjustableInterval {
 }
 
 struct RateLimitFuture<T> {
-    pending_items: Rc<VecDeque<T>>,
+    pending_items: Rc<RefCell<VecDeque<T>>>,
     adj_interval: AdjustableInterval,
     // Adjustable interval, used to know when we are allowed to send a message.
     interval: Interval,
@@ -102,7 +103,7 @@ enum InspectCorrectTaskError {
 
 struct InspectCorrectTask<T> {
     cur_send_ns: u32,
-    pending_items: Rc<VecDeque<T>>,
+    pending_items: Rc<RefCell<VecDeque<T>>>,
     queue_len: usize,
     adjust_sender: mpsc::Sender<Duration>,
     inspect_interval: Interval,
@@ -110,7 +111,7 @@ struct InspectCorrectTask<T> {
 
 impl<T> InspectCorrectTask<T> {
     fn new(initial_send_ns: u32, inspect_interval: Interval, 
-           pending_items: Rc<VecDeque<T>>, queue_len: usize, 
+           pending_items: Rc<RefCell<VecDeque<T>>>, queue_len: usize, 
            adjust_sender: mpsc::Sender<Duration>) -> Self {
 
         InspectCorrectTask {
@@ -134,9 +135,10 @@ impl<T> InspectCorrectTask<T> {
     }
 
     fn inspect_and_correct(&mut self) -> Poll<(), InspectCorrectTaskError> {
-        let new_send_ns = if self.pending_items.len() > 3 * self.queue_len / 4 {
+        let pending_items_len = self.pending_items.borrow().len();
+        let new_send_ns = if pending_items_len > 3 * self.queue_len / 4 {
             (self.cur_send_ns * 3 / 4) + 1
-        } else if self.pending_items.len() < self.queue_len / 4_{
+        } else if pending_items_len < self.queue_len / 4_{
             self.cur_send_ns + INCREASE_SEND_NS
         } else {
             return Ok(Async::NotReady);
@@ -168,12 +170,12 @@ struct RateLimitTask<T> {
     inner_sender: mpsc::Sender<T>,
     inner_receiver: mpsc::Receiver<T>,
     adj_interval: AdjustableInterval,
-    pending_items: Rc<VecDeque<T>>,
+    pending_items: Rc<RefCell<VecDeque<T>>>,
 }
 
 impl<T> RateLimitTask<T> {
     fn new(inner_sender: mpsc::Sender<T>, inner_receiver: mpsc::Receiver<T>,
-           adj_interval: AdjustableInterval, pending_items: Rc<VecDeque<T>>) -> Self {
+           adj_interval: AdjustableInterval, pending_items: Rc<RefCell<VecDeque<T>>>) -> Self {
 
         RateLimitTask {
             inner_sender, 
@@ -189,17 +191,17 @@ impl<T> Future for RateLimitTask<T> {
     type Error = RateLimitTaskError;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let adj_interval_poll = self.adj_interval.poll();
-        match adj_interval_poll {
+        match self.adj_interval.poll() {
             Ok(Async::NotReady) => Ok(Async::NotReady),
             Ok(Async::Ready(None)) => Ok(Async::Ready(())),
             Ok(Async::Ready(Some(()))) => {
-                if let Some(item) = self.pending_items.pop_front() {
+                let mut pending_items = self.pending_items.borrow_mut();
+                if let Some(item) = pending_items.pop_front() {
                     match self.inner_sender.start_send(item) {
                         Err(_send_error) => Ok(Async::Ready(())),
                         Ok(AsyncSink::NotReady(item)) => {
                             // Put the item back into the queue:
-                            self.pending_items.push_front(item);
+                            pending_items.push_front(item);
                             Ok(Async::NotReady)
                         },
                         Ok(AsyncSink::Ready) => Ok(Async::NotReady),
@@ -222,7 +224,7 @@ fn rate_limit_channel<T: 'static>(queue_len: usize, handle: &reactor::Handle) ->
     let (inner_sender, rate_limit_receiver) = mpsc::channel(0);
     let (adjust_sender, adjust_receiver) = mpsc::channel(0);
 
-    let pending_items = Rc::new(VecDeque::new());
+    let pending_items = Rc::new(RefCell::new(VecDeque::new()));
 
     let inspect_interval = match Interval::new(Duration::new(0, INSPECT_NS), &handle) {
         Ok(interval) => interval,
