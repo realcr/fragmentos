@@ -74,18 +74,6 @@ impl Stream for AdjustableInterval {
     }
 }
 
-struct RateLimitFuture<T> {
-    pending_items: Rc<RefCell<VecDeque<T>>>,
-    adj_interval: AdjustableInterval,
-    // Adjustable interval, used to know when we are allowed to send a message.
-    interval: Interval,
-    // Constant interval for updating the adj_interval
-}
-
-
-struct RateLimitState {
-    time_stream: (),
-}
 
 enum RateLimitChannelError {
     IntervalCreationFailed(io::Error),
@@ -165,6 +153,7 @@ impl<T> Future for InspectCorrectTask<T> {
 enum RateLimitTaskError {
     AdjustableIntervalFailure(AdjustableIntervalError),
 }
+
 
 struct RateLimitTask<T> {
     inner_sender: mpsc::Sender<T>,
