@@ -76,6 +76,7 @@ enum RateLimitTaskError {
     AdjustableIntervalFailure(AdjustableIntervalError),
     IntervalError(io::Error),
     IntervalEnded,
+    InnerReceiverError,
 }
 
 
@@ -116,7 +117,10 @@ impl<T> RateLimitTask<T> {
         };
 
         match self.adj_interval.set_duration(Duration::new(0, new_send_ns)) {
-            Ok(()) => Ok(Async::NotReady),
+            Ok(()) => { 
+                self.cur_send_ns = new_send_ns;
+                Ok(Async::NotReady)
+            },
             Err(e) => Err(RateLimitTaskError::AdjustableIntervalFailure(e)),
         }
     }
@@ -128,41 +132,47 @@ impl<T> Future for RateLimitTask<T> {
 
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        // TODO: Keep implementing this function.
+        // Adjust the sending speed according to the amount of items in self.pending_items:
+        // TODO: Will we need a loop here?
         match self.inspect_interval.poll() {
             Ok(Async::NotReady) => {},
             Ok(Async::Ready(None)) => return Err(RateLimitTaskError::IntervalEnded),
-            Ok(Async::Ready(Some(()))) => {     // TODO
-            },
+            Ok(Async::Ready(Some(()))) => {self.inspect_and_correct()?;},
             Err(e) => return Err(RateLimitTaskError::IntervalError(e)),
         };
 
+        // Check if we may send a message.
+        // If so, we attempt to send one message.
+        // TODO: Will we need a loop here?
         match self.adj_interval.poll() {
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Ok(Async::Ready(None)) => Ok(Async::Ready(())),
+            Ok(Async::NotReady) => {},
+            Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
             Ok(Async::Ready(Some(()))) => {
                 if let Some(item) = self.pending_items.pop_front() {
                     match self.inner_sender.start_send(item) {
-                        Err(_send_error) => Ok(Async::Ready(())),
+                        Err(_send_error) => return Ok(Async::Ready(())),
                         Ok(AsyncSink::NotReady(item)) => {
                             // Put the item back into the queue:
                             self.pending_items.push_front(item);
-                            Ok(Async::NotReady)
                         },
-                        Ok(AsyncSink::Ready) => Ok(Async::NotReady),
+                        Ok(AsyncSink::Ready) => {},
                     }
-                } else {
-                    Ok(Async::NotReady)
                 }
             },
-            Err(e) => Err(RateLimitTaskError::AdjustableIntervalFailure(e)),
+            Err(e) => return Err(RateLimitTaskError::AdjustableIntervalFailure(e)),
+        };
+
+        // Try to receive as many messages as possible:
+        while self.pending_items.len() < self.queue_len {
+            match self.inner_receiver.poll() {
+                Ok(Async::NotReady) => break,
+                Ok(Async::Ready(Some(item))) => self.pending_items.push_back(item),
+                Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
+                Err(()) => return Err(RateLimitTaskError::InnerReceiverError),
+            };
         }
-
-
-        // TODO: Missing here a poll that reads from inner_sender into self.pending_items.
-        // Should not be polled if self.pending_items is full.
+        Ok(Async::NotReady)
     }
-
 }
 
 
