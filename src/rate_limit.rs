@@ -10,8 +10,8 @@ use tokio_core::reactor::{Timeout, Handle};
 
 
 const INITIAL_ITEMS_PER_MS: usize = 1;
+const MAX_ITEMS_PER_MS: usize = 0x1000;
 const MILLISECOND: usize = 1_000_000;
-const MAX_SEND_ITEMS_LEFT: usize = 0x400 ;
 
 
 enum RateLimitError {
@@ -64,7 +64,7 @@ impl<T> RateLimitFuture<T> {
             // Nothing to do
             return;
         };
-        self.items_per_ms = cmp::min(new_items_per_ms, MAX_SEND_ITEMS_LEFT);
+        self.items_per_ms = cmp::min(new_items_per_ms, MAX_ITEMS_PER_MS);
     }
 }
 
@@ -82,11 +82,7 @@ impl<T> Future for RateLimitFuture<T> {
                 match next_timeout.poll() {
                     Ok(Async::Ready(())) => {
                         self.inspect_and_correct();
-                        // TODO: Make sure panic is not 
-                        // possible here because of overflow:
-                        self.send_items_left = cmp::min(
-                            self.send_items_left + self.items_per_ms,
-                            MAX_SEND_ITEMS_LEFT);
+                        self.send_items_left = self.items_per_ms;
                     },
                     Ok(Async::NotReady) => {},
                     Err(e) => return Err(RateLimitError::TimeoutError(e)),
