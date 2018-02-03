@@ -1,166 +1,116 @@
 use std::time::{Duration};
-use std::io;
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::{io, cmp};
 use std::collections::VecDeque;
 
 use futures::sync::mpsc;
 use futures::{Sink, Future, Poll, Stream, Async, AsyncSink};
-// use futures::future::{loop_fn};
 
 use tokio_core::reactor;
-use tokio_core::reactor::Interval;
+use tokio_core::reactor::{Timeout, Handle};
 
-enum AdjustableIntervalError {
-    AdjustReceiverError,
-    IntervalCreationFailed(io::Error),
-    IntervalError(io::Error),
-    IntervalEnded,
+
+const INITIAL_ITEMS_PER_MS: usize = 1;
+const MILLISECOND: usize = 1_000_000;
+const MAX_SEND_ITEMS_LEFT: usize = 0x400 ;
+
+
+enum RateLimitError {
+    TimeoutError(io::Error),
 }
 
 
-struct AdjustableInterval {
-    handle: reactor::Handle,
-    interval: Interval,
-}
-
-impl AdjustableInterval {
-    fn new(initial_duration: Duration, handle: &reactor::Handle) -> Result<Self, AdjustableIntervalError>  {
-
-        let interval = match Interval::new(initial_duration, handle) {
-            Ok(interval) => interval,
-            Err(e) => return Err(AdjustableIntervalError::IntervalCreationFailed(e)),
-        };
-
-        Ok(AdjustableInterval {
-            handle: handle.clone(),
-            interval,
-        })
-    }
-
-    fn set_duration(&mut self, duration: Duration) -> Result<(), AdjustableIntervalError> {
-        self.interval = match Interval::new(duration, &self.handle) {
-            Ok(interval) => interval,
-            Err(e) => return Err(AdjustableIntervalError::IntervalCreationFailed(e)),
-        };
-        Ok(())
-    }
-}
-
-impl Stream for AdjustableInterval {
-    type Item = ();
-    type Error = AdjustableIntervalError;
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        // Check if a new time tick is ready:
-        match self.interval.poll() {
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Ok(Async::Ready(Some(()))) => Ok(Async::Ready(Some(()))),
-            Ok(Async::Ready(None)) => Err(AdjustableIntervalError::IntervalEnded),
-            Err(e) => Err(AdjustableIntervalError::IntervalError(e)),
-        }
-    }
-}
-
-
-enum RateLimitChannelError {
-    IntervalCreationFailed(io::Error),
-    AdjustableIntervalError(AdjustableIntervalError),
-}
-
-const INSPECT_NS: u32 = 1_000_000;
-const INITIAL_SEND_NS: u32 = 10_000_000;
-const INCREASE_SEND_NS: u32 = 500_000;
-
-
-enum RateLimitTaskError {
-    AdjustableIntervalFailure(AdjustableIntervalError),
-    IntervalError(io::Error),
-    IntervalEnded,
-    InnerReceiverError,
-}
-
-
-struct RateLimitTask<T> {
+struct RateLimitFuture<T> {
     inner_sender: mpsc::Sender<T>,
     inner_receiver: mpsc::Receiver<T>,
-    adj_interval: AdjustableInterval,
     pending_items: VecDeque<T>,
-    cur_send_ns: u32,
+    opt_next_timeout: Option<Timeout>,
+    send_items_left: usize,
     queue_len: usize,
-    inspect_interval: Interval,
+    items_per_ms: usize,
+    handle: Handle,
 }
 
-impl<T> RateLimitTask<T> {
-    fn new(inner_sender: mpsc::Sender<T>, inner_receiver: mpsc::Receiver<T>,
-           adj_interval: AdjustableInterval, inspect_interval: Interval, 
-           queue_len: usize) -> Self {
+impl<T> RateLimitFuture<T> {
+    fn new(inner_sender: mpsc::Sender<T>, 
+           inner_receiver: mpsc::Receiver<T>,
+           queue_len: usize,
+           handle: &Handle) -> Self {
 
-        RateLimitTask {
+        RateLimitFuture {
             inner_sender, 
             inner_receiver, 
-            adj_interval,
             pending_items: VecDeque::new(),
-            cur_send_ns: INITIAL_SEND_NS,
+            opt_next_timeout: None,
+            send_items_left: INITIAL_ITEMS_PER_MS,
             queue_len,
-            inspect_interval,
+            items_per_ms: INITIAL_ITEMS_PER_MS,
+            handle: handle.clone(),
         }
     }
 
-    fn inspect_and_correct(&mut self) -> Poll<(), RateLimitTaskError> {
+    fn inspect_and_correct(&mut self) {
+
         let pending_items_len = self.pending_items.len();
-        let new_send_ns = if pending_items_len > 3 * self.queue_len / 4 {
-            (self.cur_send_ns * 3 / 4) + 1
+        let new_items_per_ms = if pending_items_len > 3 * self.queue_len / 4 {
+            (self.items_per_ms * 4 / 3) + 1
         } else if pending_items_len < self.queue_len / 4_{
-            self.cur_send_ns + INCREASE_SEND_NS
+            if self.items_per_ms <= 1 {
+                1
+            } else {
+                self.items_per_ms - 1
+            }
         } else {
-            return Ok(Async::NotReady);
+            // Nothing to do
+            return;
         };
 
-        match self.adj_interval.set_duration(Duration::new(0, new_send_ns)) {
-            Ok(()) => { 
-                self.cur_send_ns = new_send_ns;
-                Ok(Async::NotReady)
-            },
-            Err(e) => Err(RateLimitTaskError::AdjustableIntervalFailure(e)),
-        }
+        self.items_per_ms = cmp::min(new_items_per_ms, MAX_SEND_ITEMS_LEFT);
     }
 }
 
-impl<T> Future for RateLimitTask<T> {
+impl<T> Future for RateLimitFuture<T> {
     type Item = ();
-    type Error = RateLimitTaskError;
+    type Error = RateLimitError;
 
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        // Adjust the sending speed according to the amount of items in self.pending_items:
-        // TODO: Will we need a loop here?
-        match self.inspect_interval.poll() {
-            Ok(Async::NotReady) => {},
-            Ok(Async::Ready(None)) => return Err(RateLimitTaskError::IntervalEnded),
-            Ok(Async::Ready(Some(()))) => {self.inspect_and_correct()?;},
-            Err(e) => return Err(RateLimitTaskError::IntervalError(e)),
-        };
-
-        // Check if we may send a message.
-        // If so, we attempt to send one message.
-        // TODO: Will we need a loop here?
-        match self.adj_interval.poll() {
-            Ok(Async::NotReady) => {},
-            Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
-            Ok(Async::Ready(Some(()))) => {
-                if let Some(item) = self.pending_items.pop_front() {
-                    match self.inner_sender.start_send(item) {
-                        Err(_send_error) => return Ok(Async::Ready(())),
-                        Ok(AsyncSink::NotReady(item)) => {
-                            // Put the item back into the queue:
-                            self.pending_items.push_front(item);
-                        },
-                        Ok(AsyncSink::Ready) => {},
-                    }
+        // If timer is ready, we add tokens to the token bucket
+        // by increasing self.send_items_left.
+        match self.opt_next_timeout.take() {
+            None => {},
+            Some(mut next_timeout) => {
+                match next_timeout.poll() {
+                    Ok(Async::Ready(())) => {
+                        self.inspect_and_correct();
+                        // TODO: Make sure panic is not 
+                        // possible here because of overflow:
+                        self.send_items_left = cmp::min(
+                            self.send_items_left + self.items_per_ms,
+                            MAX_SEND_ITEMS_LEFT);
+                    },
+                    Ok(Async::NotReady) => {},
+                    Err(e) => return Err(RateLimitError::TimeoutError(e)),
                 }
             },
-            Err(e) => return Err(RateLimitTaskError::AdjustableIntervalFailure(e)),
         };
+
+        // Send as many messages as possible:
+        while self.send_items_left > 0 {
+            if let Some(item) = self.pending_items.pop_front() {
+                match self.inner_sender.start_send(item) {
+                    Err(_send_error) => return Ok(Async::Ready(())),
+                    Ok(AsyncSink::NotReady(item)) => {
+                        // Put the item back into the queue:
+                        self.pending_items.push_front(item);
+                    },
+                    Ok(AsyncSink::Ready) => {
+                        self.send_items_left -= 1;
+                    },
+                }
+            } else {
+                break;
+            }
+        }
 
         // Try to receive as many messages as possible:
         while self.pending_items.len() < self.queue_len {
@@ -168,46 +118,46 @@ impl<T> Future for RateLimitTask<T> {
                 Ok(Async::NotReady) => break,
                 Ok(Async::Ready(Some(item))) => self.pending_items.push_back(item),
                 Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
-                Err(()) => return Err(RateLimitTaskError::InnerReceiverError),
+                Err(()) => return Ok(Async::Ready(())),
             };
         }
+
+        // If there are any pending items, set the Timer to poll us again later.
+        if self.pending_items.len() > 0 {
+            self.opt_next_timeout = Some(
+                match Timeout::new(Duration::from_millis(1), &self.handle) {
+                    Ok(mut timeout) => {
+                        match timeout.poll() {
+                            Err(e) => return Err(RateLimitError::TimeoutError(e)),
+                            _ => {},
+                        };
+                        timeout
+                    }
+                    Err(e) => return Err(RateLimitError::TimeoutError(e)),
+                }
+            );
+        }
+
         Ok(Async::NotReady)
     }
 }
 
 
 fn rate_limit_channel<T: 'static>(queue_len: usize, handle: &reactor::Handle) -> 
-    Result<(mpsc::Sender<T>, mpsc::Receiver<T>), RateLimitChannelError>  {
+    (mpsc::Sender<T>, mpsc::Receiver<T>)  {
 
     let (rate_limit_sender, inner_receiver) = mpsc::channel(0);
     let (inner_sender, rate_limit_receiver) = mpsc::channel(0);
 
-    let pending_items = Rc::new(RefCell::new(VecDeque::<T>::new()));
-
-    let inspect_interval = match Interval::new(Duration::new(0, INSPECT_NS), &handle) {
-        Ok(interval) => interval,
-        Err(e) => return Err(RateLimitChannelError::IntervalCreationFailed(e)),
-    };
-
-    let adj_interval = match AdjustableInterval::new( 
-            Duration::new(0, INITIAL_SEND_NS), 
-            handle) {
-
-        Ok(adj_interval) => adj_interval,
-        Err(e) => return Err(RateLimitChannelError::AdjustableIntervalError(e)),
-    };
-
-    let rate_limit_task = RateLimitTask::new(
+    let rate_limit_future = RateLimitFuture::new(
         inner_sender,
         inner_receiver,
-        adj_interval,
-        inspect_interval,
-        queue_len);
-
+        queue_len,
+        handle);
 
     // TODO: Add logging for possible errors here:
-    handle.spawn(rate_limit_task.map_err(|_e| ()));
+    handle.spawn(rate_limit_future.map_err(|_e| ()));
 
-    Ok((rate_limit_sender, rate_limit_receiver))
+    (rate_limit_sender, rate_limit_receiver)
 }
 
