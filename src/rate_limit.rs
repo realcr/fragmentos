@@ -49,7 +49,6 @@ impl<T> RateLimitFuture<T> {
     }
 
     fn inspect_and_correct(&mut self) {
-
         let pending_items_len = self.pending_items.len();
         let new_items_per_ms = if pending_items_len > 3 * self.queue_len / 4 {
             (self.items_per_ms * 4 / 3) + 1
@@ -63,7 +62,6 @@ impl<T> RateLimitFuture<T> {
             // Nothing to do
             return;
         };
-
         self.items_per_ms = cmp::min(new_items_per_ms, MAX_SEND_ITEMS_LEFT);
     }
 }
@@ -93,6 +91,7 @@ impl<T> Future for RateLimitFuture<T> {
                 }
             },
         };
+
 
         // Send as many messages as possible:
         while self.send_items_left > 0 {
