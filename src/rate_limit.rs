@@ -162,3 +162,39 @@ fn rate_limit_channel<T: 'static>(queue_len: usize, handle: &reactor::Handle) ->
     (rate_limit_sender, rate_limit_receiver)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream;
+    use tokio_core::reactor::Core;
+
+    #[test]
+    fn test_rate_limit_basic() {
+        let mut core = Core::new().unwrap();
+        let handle = core.handle();
+
+        let (rl_sender, rl_receiver) = rate_limit_channel(5, &handle);
+        let source_stream = stream::iter_ok(0 .. 100u32);
+
+        handle.spawn(
+            source_stream.forward(rl_sender)
+            .map_err(|_e: mpsc::SendError<u32>| ())
+            .and_then(|_| Ok(()))
+        );
+
+        let mut res_vec = Vec::new();
+        {
+            let recv_future = rl_receiver.for_each(|item| {
+                res_vec.push(item);
+                Ok(())
+            }); 
+            core.run(recv_future).unwrap();
+        }
+
+        let expected_vec = (0 .. 100).collect::<Vec<u32>>();
+        assert_eq!(res_vec, expected_vec);
+    }
+}
+
+
+
