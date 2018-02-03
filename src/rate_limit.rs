@@ -102,6 +102,7 @@ impl<T> Future for RateLimitFuture<T> {
                     Ok(AsyncSink::NotReady(item)) => {
                         // Put the item back into the queue:
                         self.pending_items.push_front(item);
+                        break;
                     },
                     Ok(AsyncSink::Ready) => {
                         self.send_items_left -= 1;
