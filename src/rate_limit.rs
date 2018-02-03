@@ -21,6 +21,8 @@ enum RateLimitError {
 
 struct RateLimitFuture<T> {
     inner_sender: mpsc::Sender<T>,
+    // TODO: inner_receiver_opt: Option<mpsc::Receiver<T>>,
+    // Fix bug:
     inner_receiver: mpsc::Receiver<T>,
     pending_items: VecDeque<T>,
     opt_next_timeout: Option<Timeout>,
