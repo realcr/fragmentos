@@ -48,6 +48,7 @@ impl<T> RateLimitFuture<T> {
     }
 
     fn inspect_and_correct(&mut self) {
+        // println!("self.items_per_ms = {}", self.items_per_ms);
         let pending_items_len = self.pending_items.len();
         let new_items_per_ms = if pending_items_len > 3 * self.queue_len / 4 {
             (self.items_per_ms * 4 / 3) + 1
