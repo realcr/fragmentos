@@ -8,13 +8,13 @@ use std::net::SocketAddr;
 use std::{env};
 use std::time::Instant;
 
-use futures::{Stream, Sink};
+use futures::{Future, Stream, Sink};
 
 use tokio_core::net::{UdpSocket};
 use tokio_core::reactor::Core;
 
 use fragmentos::{FragMsgReceiver, FragMsgSender, 
-    max_message, rate_limit_sink};
+    max_message, rate_limit_channel};
 use fragmentos::utils::DgramCodec;
 
 // Maximum size of UDP datagram we are willing to send.
@@ -44,9 +44,16 @@ fn main() {
 
     let max_dgram_len = UDP_MAX_DGRAM;
 
-    let rate_limit_buffer = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
-    let rl_sink = rate_limit_sink(sink, rate_limit_buffer, &handle);
-    let frag_sender = FragMsgSender::new(rl_sink, max_dgram_len, rand::thread_rng());
+    let queue_len = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
+    let (rl_sender, rl_receiver) = rate_limit_channel(queue_len, &handle);
+    // let rl_sink = rate_limit_sink(sink, rate_limit_buffer, &handle);
+    handle.spawn(
+        sink.sink_map_err(|_| ())
+            .send_all(rl_receiver)
+            .then(|_| Ok(()))
+    );
+
+    let frag_sender = FragMsgSender::new(rl_sender, max_dgram_len, rand::thread_rng());
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
 
     let frag_receiver = frag_receiver.map(|x| {
