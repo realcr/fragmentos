@@ -11,7 +11,6 @@ use tokio_core::reactor::{Timeout, Handle};
 
 const INITIAL_ITEMS_PER_MS: usize = 1;
 const MAX_ITEMS_PER_MS: usize = 0x1000;
-const MILLISECOND: usize = 1_000_000;
 
 
 enum RateLimitError {
