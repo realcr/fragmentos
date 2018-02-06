@@ -57,7 +57,7 @@ fn main() {
     let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
 
     let frag_receiver = frag_receiver.map(|x| {
-        // println!("Received a Fragmentos message.");
+        println!("Received a Fragmentos message!");
         x
     });
 
