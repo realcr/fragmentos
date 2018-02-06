@@ -21,9 +21,7 @@ enum RateLimitError {
 
 struct RateLimitFuture<T> {
     inner_sender: mpsc::Sender<T>,
-    // TODO: inner_receiver_opt: Option<mpsc::Receiver<T>>,
-    // Fix bug:
-    inner_receiver: mpsc::Receiver<T>,
+    inner_receiver_opt: Option<mpsc::Receiver<T>>,
     pending_items: VecDeque<T>,
     opt_next_timeout: Option<Timeout>,
     send_items_left: usize,
@@ -40,7 +38,7 @@ impl<T> RateLimitFuture<T> {
 
         RateLimitFuture {
             inner_sender, 
-            inner_receiver, 
+            inner_receiver_opt: Some(inner_receiver), 
             pending_items: VecDeque::new(),
             opt_next_timeout: None,
             send_items_left: INITIAL_ITEMS_PER_MS,
@@ -65,6 +63,19 @@ impl<T> RateLimitFuture<T> {
             return;
         };
         self.items_per_ms = cmp::min(new_items_per_ms, MAX_ITEMS_PER_MS);
+    }
+
+    fn try_recv(&mut self, mut inner_receiver: mpsc::Receiver<T>) -> Option<mpsc::Receiver<T>> {
+        while self.pending_items.len() < self.queue_len {
+            match inner_receiver.poll() {
+                Ok(Async::NotReady) => { 
+                    return Some(inner_receiver)
+                },
+                Ok(Async::Ready(Some(item))) => self.pending_items.push_back(item),
+                Ok(Async::Ready(None)) | Err(()) => return None,
+            };
+        }
+        Some(inner_receiver)
     }
 }
 
@@ -111,14 +122,20 @@ impl<T> Future for RateLimitFuture<T> {
         }
 
         // Try to receive as many messages as possible:
-        while self.pending_items.len() < self.queue_len {
-            match self.inner_receiver.poll() {
-                Ok(Async::NotReady) => break,
-                Ok(Async::Ready(Some(item))) => self.pending_items.push_back(item),
-                Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
-                Err(()) => return Ok(Async::Ready(())),
-            };
+        self.inner_receiver_opt = match self.inner_receiver_opt.take() {
+            None => None,
+            Some(inner_receiver) => {
+                self.try_recv(inner_receiver)
+            },
+        };
+
+        if self.pending_items.len() == 0 && self.inner_receiver_opt.is_none() {
+            // If there are no more pending items to be sent, and the receiver is closed,
+            // we have nothing more to do here.
+            return Ok(Async::Ready(()));
         }
+
+
 
         // If there are any pending items, set the Timer to poll us again later.
         if self.pending_items.len() > 0 {
@@ -141,7 +158,7 @@ impl<T> Future for RateLimitFuture<T> {
 }
 
 
-fn rate_limit_channel<T: 'static>(queue_len: usize, handle: &reactor::Handle) -> 
+pub fn rate_limit_channel<T: 'static>(queue_len: usize, handle: &reactor::Handle) -> 
     (mpsc::Sender<T>, mpsc::Receiver<T>)  {
 
     let (rate_limit_sender, inner_receiver) = mpsc::channel(0);
