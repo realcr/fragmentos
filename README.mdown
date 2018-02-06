@@ -1,0 +1,249 @@
+# Fragmentos fragmentation system
+
+## Abstract
+
+Fragmentos is a fragmentation system allowing to send large datagrams over
+protocols that support only small datagrams. Compared to traditional
+fragmentation systems, Fragmentos sends about twice more data while achieving
+improved delivery rate.
+
+## Intro
+
+Given two nodes `x` and `y` on the internet, if `x` attempts to send a large
+UDP datagram `y`, it is likely that the datagram will be fragmented, in the
+lower IP layer, to a few IP packets. Those IP packets will be reconstructed
+somewhere on a router on the way, or possibly at the endpoint `y`.
+
+Traditional IP Packet fragmentation works by splitting a large IP packet into a
+few smaller packets. The problem with this method is that the original large
+packet is less likely to arrive at its destination, as the loss of any of the
+fragments will lead to the loss of the original large packet. 
+
+Thinking about a naive probabilistic model, if an IP packet sent from `x` to
+`y` arrives at `y` with probability `p`, then a datagram which was fragmented
+to two IP packets will arrive at probability `p^2`. If `p = 3/4`, then
+`q := p^2 = 9/16`, which represents much lower odds for successful
+delivery.
+
+This document presents a different fragmentation method which increases the
+likelihood of successful delivery given the model discussed above. For example,
+Instead of splitting a large datagram into two packets, we create three shares
+of the datagram in a way that every two shares are enough to reconstruct the
+original datagram. 
+
+In this case, if `x` wants to send the datagram to `y`, `x` sends all the three
+shares of the datagram to `y`. In the naive model described above where the
+odds of successful delivery for one IP packet are `p`, we obtain that the odds
+for successful arrival for the complete datagram are 
+`q := p^3 + 3p^2(1-p)`. For `p = 3/4`, this will result in
+`q = 0.84375`. Surprisingly in this case `q > p`.
+
+
+## Splitting a message
+
+Given a data chunk `M`, we want to split it to `2b-1` fragments so that every `b`
+fragments are enough to reconstruct the original data chunk `M`.
+
+Using information theoretic considerations we can
+conclude that each share should be of size at least `len(M) / b`, so that the
+reconstruction algorithm gets at least `b*(len(M) / b) = b` bytes of input.
+
+To do this we will use the [Reed-Solomon erasure
+code](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction). 
+Reed-Solomon erasure code allows us to build the following model:
+Assume `d` shares of data of length `l` each. Reed-Solomon erasure code can
+create additional `e` shares of data of length `l` each, such that if any `e`
+shares of data are erased, it is possible to recover them. In other words, any
+`d` shares of data are enough to reconstruct the rest of the shares.
+
+The rust crate
+[reed-solomon-erasure](https://github.com/darrenldl/reed-solomon-erasure)
+contains implementation of Reed-Solomon erasure code that allows to choose any
+`d` and `e` we desire, as long as `d + e <= 256`. This is due to the limitation
+of the order underlying field `GF(256)`.
+
+Given a data chunk `M`, we pick `d = b` and `e = b - 1`.  We first divide it
+into `b` fragments of equal lengths. (If this is not possible, we will need to
+add some trailing padding bytes to `M` to make sure `len(M)` is divisible by `b`).
+
+We then have `b` fragments of `M`. We create extra `e = b-1` fragments using
+the Reed-Solomon erasure code. We then end up with `b + (b-1) = 2b-1`
+fragments. Every `b` fragments out of those `2b-1`
+
+We have `b + (b-1) = 2b-1` fragments, where every `b` fragments allow to
+reconstruct the rest of the `b - 1` fragments, obtaining the original messages.
+
+
+## Fragmentos messages structure
+
+A message `M` from is sent from `x` to `y` by transmitting a few Fragmentos
+messages. Each **Fragmentos message** is of the following form:
+
+```
+- messageId         [8 bytes]
+- b                 [1 byte]
+- shareIndex        [1 byte]
+- shareData         [variable amount of bytes]
+- shortHash         [8 bytes]   (First 8 bytes of Sha512/256)
+```
+
+The actual data that we split to data shares is: 
+
+`T := nonce8 || paddingCount || M || padding`
+
+Where `||` means concatenation. `nonce8` is of size `8` bytes, `paddingCount`
+is of size `1` byte.
+
+The value `paddingCount := (b - ((8 + 1 + len(M)) % b)) % b` is the amount of `0`
+padding bytes at the end of the message `M`. Recall that we need padding bytes
+at the end of `M` to make sure that the data we split to data shares, `T`, is
+of size divisible by `b`. We use the value of `paddingCount` to be able to cut
+the padding bytes at the receiving side.
+
+`nonce8` is a random 8 bytes nonce that is generated at the time of sending the
+message `M`. It is used as means for the receiver end to distinguish between
+identical messages sent during the same short period of time. For two identical
+messages, different `nonce8` values will generate different `messageId`-s.
+
+
+`messageId` is obtained by calculating `sha512/256` over `T`, taking only the first
+`8` bytes of the result.
+
+`b` represents the amount of shares that are required to reconstruct the
+original message. It is necessary that `b \in [1, 128]`. Any other value of `b`
+is illegal. A message with illegal `b` value must be ignored.
+
+`shareIndex` is the index of the current share. There are `2b - 1` shares,
+therefore `0 <= shareIndex < 2b - 1`. Any other value of `shareIndex` is
+illegal. A message with illegal `shareIndex` value must be discarded.
+
+`shareData` is the actual data of this share. Its length could be deduced by
+subtracting the total size of all the other fields from the total size of the
+datagram. It contains a share of the data `T`.
+
+`shortHash` is the first `8` bytes of Sha512/256 over all the previous fields
+in the message. It is used to verify the integrity of the message. If
+`shortHash` is invalid, the fragmentos message is discarded.
+
+
+## Maximum Fragmentos datagram
+
+We assume that we use a protocol where we can not send datagrams over `n` bytes.
+We begin by calculating the maximum size of datagram we can send using the
+Fragmentos system over the given protocol.
+
+We can split a message to at most `256` shares, a restriction imposed by the
+size of the field `GF(256)`. Therefore `2b - 1 <= 256` and `b < 128`.
+
+Every message share resides inside a Fragmentos message. The rest of the fields
+in a Fragmentos message (`messageId, b, shareIndex, shortHash`) take `8 +
+1 + 1 + 8 = 18` bytes. Hence we are left with `n - 18` bytes for `shareData`.
+
+Therefore we should be able to send a `T` data message of size at most
+`128*(n-18)`.  Recall that `T` contains `nonce8, paddingCount` which take
+together `8 + 1 = 9` bytes. This leaves `d(n) := 128*(n-18) - 9` bytes for `M`.
+
+
+If we use UDP as the underlying protocol for sending datagrams, we can pick as
+an example the value `n=512` as a safe size for a UDP packet. By safe we mean
+that it is unlikely for the UDP packet to be fragmented by the lower IP layer.
+
+As a result, we obtain `d(n) = 128*(512 - 18) - 9 = 63223` bytes (close to
+`64KB`) as the maximum possible Fragmentos datagram.
+
+
+## Sending a message
+
+We assume the value `n` for the maximum size for a safe datagram in the
+underlying datagram protocol.
+
+Algorithm for sending a message `M`:
+
+1. If `len(M) > d(n)`, the message is too large. We abort.
+
+2. Calculate `b := \lceil\frac{8 + 1 + len(M)}{n - 18}\rceil`.
+
+3. Construct `T := nonce8 || paddingCount || M || padding`.
+   `padding` should contain enough `\x00` bytes so that `T` will have length
+   that is divisible by `b`. `paddingCount` is set to the amount of padding
+   bytes.
+
+4. Split `T` to `2b-1` data shares.
+
+5. For each data share of `T`, create a Fragmentos message and send it to the destination. 
+   The message's fields will be filled as follows:
+
+    - `messageId = sha512/256(T)[0:8]`
+    - `b`
+    - `shareIndex` is the data share number.
+    - `shareData` is the data of the share.
+    - `shortHash = sha512/256(messageId || b || shareIndex || shareData)[0:8]` 
+
+
+## Receiving a message
+
+### Structures to maintain in memory:
+
+- `usedMessageIds`: A set of messageIds that were recently processed.
+    A messageId has to stay in this list for at least `PROCESSED_TIMEOUT`
+    seconds. Then it may be removed.
+
+- `curMessages`: A dictionary for currently processed
+    messages, having messageIds as keys. Every entry contains:
+
+    - The value `b`.
+    - `shareLengh`: length (in bytes) of a share data. (All shares should have 
+        exactly the same amount of bytes).
+    - A set of the received data shares: `(shareIndex, shareData)` 
+
+
+
+### Upon receiving a Fragmentos message `F`:
+
+1. Make sure that:
+    `shortHash = sha512/256(messageId || b || shareIndex || shareData)[0:8]`.
+    Otherwise, discard the message.
+
+2. If `F.messageId` is in `usedMessageIds`,
+   `usedMessageIds[F.massageId]` is refreshed, so that it will stay
+   another `PROCESSED_TIMEOUT` seconds before being cleaned up. The message is
+   discarded.
+
+3. If there exists an entry `entry` with the key `F.messageId` inside
+   `curMessages` but `entry.b != F.b` or `entry.shareLength !=
+   len(F.shareData)`, discard the message.
+
+4. If there is no entry with the key `F.messageId` inside `curMessages`,
+   create a new entry with `messageId = F.messageId`, `b = F.b` and
+   `shareLength = len(F.shareData)`.
+
+5. Given that the message was not discarded yet, denote by `entry` the relevant
+   entry from `curMessages` relevant for our message.
+
+6. If `F.shareIndex` is already present in `entry`, discard the message.
+
+7. Insert `(F.shareIndex, F.shareData)` as a new data share to
+  `entry`.
+
+8. If the amount of shares in the entry is less than `b`, return.
+
+9. Add `messageId` to `usedMessageIds`. 
+
+10. Remove `entry` from `curMessages`.
+
+11. Reconstruct the shares to obtain `T := nonce8 || paddingCount || M || padding`. 
+
+12. If `sha256(T)[0:8] != entry.messageId`:  remove the entry from `curMessages`
+   and return.
+
+13. Extract `M` from `T` and return it as a received message.
+
+
+### Cleanup algorithm (Being ran periodically):
+
+- If an `entry` in `curMessages` is older than `PROCESSED_TIMEOUT` seconds,
+    remove it and add `entry.messageId` to `usedMessageIds`.
+
+- If a `messageId` in `usedMessagesIds` is older than `PROCESSED_TIMEOUT`
+    seconds, remove it.
+
