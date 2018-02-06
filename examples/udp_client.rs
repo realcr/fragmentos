@@ -159,7 +159,7 @@ fn main() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-    let client_addr = "127.0.0.1:0".parse().unwrap();
+    let client_addr = "0.0.0.0:0".parse().unwrap();
 
     let socket = UdpSocket::bind(&client_addr, &handle).unwrap();
     let dgram_codec = DgramCodec;
