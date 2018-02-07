@@ -10,8 +10,8 @@ use tokio_core::reactor;
 use tokio_core::reactor::{Timeout, Handle};
 
 
-const INITIAL_ITEMS_PER_MS: usize = 1;
-const MAX_ITEMS_PER_MS: usize = 0x1000;
+const INITIAL_TOKENS_PER_MS: usize = 1;
+const MAX_TOKENS_PER_MS: usize = 1 << 32;
 
 /// Something that has length.
 /// This could example, describe chunks of data, 
@@ -38,9 +38,9 @@ struct RateLimitFuture<T> {
     inner_receiver_opt: Option<mpsc::Receiver<T>>,
     pending_items: VecDeque<T>,
     opt_next_timeout: Option<Timeout>,
-    send_items_left: usize,
+    send_tokens_left: usize,
     queue_len: usize,
-    items_per_ms: usize,
+    tokens_per_ms: usize,
     handle: Handle,
 }
 
@@ -55,29 +55,29 @@ impl<T: Length> RateLimitFuture<T> {
             inner_receiver_opt: Some(inner_receiver), 
             pending_items: VecDeque::new(),
             opt_next_timeout: None,
-            send_items_left: INITIAL_ITEMS_PER_MS,
+            send_tokens_left: INITIAL_TOKENS_PER_MS,
             queue_len,
-            items_per_ms: INITIAL_ITEMS_PER_MS,
+            tokens_per_ms: INITIAL_TOKENS_PER_MS,
             handle: handle.clone(),
         }
     }
 
     fn inspect_and_correct(&mut self) {
-        // println!("self.items_per_ms = {}", self.items_per_ms);
+        // println!("self.tokens_per_ms = {}", self.tokens_per_ms);
         let pending_items_len = self.pending_items.len();
-        let new_items_per_ms = if pending_items_len > 3 * self.queue_len / 4 {
-            (self.items_per_ms * 4 / 3) + 1
+        let new_tokens_per_ms = if pending_items_len > 3 * self.queue_len / 4 {
+            (self.tokens_per_ms * 4 / 3) + 1
         } else if pending_items_len < self.queue_len / 4_{
-            if self.items_per_ms <= 1 {
+            if self.tokens_per_ms <= 1 {
                 1
             } else {
-                self.items_per_ms - 1
+                self.tokens_per_ms - 1
             }
         } else {
             // Nothing to do
             return;
         };
-        self.items_per_ms = cmp::min(new_items_per_ms, MAX_ITEMS_PER_MS);
+        self.tokens_per_ms = cmp::min(new_tokens_per_ms, MAX_TOKENS_PER_MS);
     }
 
     fn try_recv(&mut self, mut inner_receiver: mpsc::Receiver<T>) -> Option<mpsc::Receiver<T>> {
@@ -101,14 +101,14 @@ impl<T: Length> Future for RateLimitFuture<T> {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         // If timer is ready, we add tokens to the token bucket
-        // by increasing self.send_items_left.
+        // by increasing self.send_tokens_left.
         match self.opt_next_timeout.take() {
             None => {},
             Some(mut next_timeout) => {
                 match next_timeout.poll() {
                     Ok(Async::Ready(())) => {
                         self.inspect_and_correct();
-                        self.send_items_left = self.items_per_ms;
+                        self.send_tokens_left = self.tokens_per_ms;
                     },
                     Ok(Async::NotReady) => {},
                     Err(e) => return Err(RateLimitError::TimeoutError(e)),
@@ -118,8 +118,15 @@ impl<T: Length> Future for RateLimitFuture<T> {
 
 
         // Send as many messages as possible:
-        while self.send_items_left > 0 {
+        while self.send_tokens_left > 0 {
             if let Some(item) = self.pending_items.pop_front() {
+                // Check if we have enough send tokens to send this element:
+                let item_len = item.len();
+                if item_len > self.send_tokens_left {
+                    // Put the item back into the queue:
+                    self.pending_items.push_front(item);
+                    break;
+                }
                 match self.inner_sender.start_send(item) {
                     Err(_send_error) => return Ok(Async::Ready(())),
                     Ok(AsyncSink::NotReady(item)) => {
@@ -128,7 +135,7 @@ impl<T: Length> Future for RateLimitFuture<T> {
                         break;
                     },
                     Ok(AsyncSink::Ready) => {
-                        self.send_items_left -= 1;
+                        self.send_tokens_left -= item_len;
                     },
                 }
             } else {
