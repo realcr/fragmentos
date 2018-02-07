@@ -192,19 +192,19 @@ mod tests {
 
         // Feed a Fragmentos state machine with the sent messages:
         let mut fsm = FragStateMachine::new();
-        let mut cur_inst = Instant::now();
 
         let b = (sent_dgrams.len() + 1) / 2;
         for i in 0 .. b - 1 {
             let (ref dgram, _address) = sent_dgrams[i];
-            assert_eq!(fsm.received_frag_message(dgram, cur_inst), None);
-            fsm.time_tick(cur_inst);
-            cur_inst += Duration::new(0,5);
+            assert_eq!(fsm.received_frag_message(dgram), None);
+            for i in 0 .. 5 {
+                fsm.time_tick();
+            }
         }
 
         // Take the last fragment (From the end):
         let (ref dgram, _address) = sent_dgrams[sent_dgrams.len() - 1];
-        let united = fsm.received_frag_message(&dgram, cur_inst).unwrap();
+        let united = fsm.received_frag_message(&dgram).unwrap();
 
         assert_eq!(united, orig_message_copy);
     }
