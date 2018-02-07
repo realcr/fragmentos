@@ -10,7 +10,7 @@ use tokio_core::reactor;
 use tokio_core::reactor::{Timeout, Handle};
 
 
-const INITIAL_TOKENS_PER_MS: usize = 1;
+const INITIAL_TOKENS_PER_MS: usize = 0x200;
 const MAX_TOKENS_PER_MS: usize = 1 << 32;
 
 /// Something that has length.
@@ -66,7 +66,7 @@ impl<T: Length> RateLimitFuture<T> {
         // println!("self.tokens_per_ms = {}", self.tokens_per_ms);
         let pending_items_len = self.pending_items.len();
         let new_tokens_per_ms = if pending_items_len > 3 * self.queue_len / 4 {
-            (self.tokens_per_ms * 4 / 3) + 1
+            (self.tokens_per_ms * 2) + 1
         } else if pending_items_len < self.queue_len / 4_{
             if self.tokens_per_ms <= 1 {
                 1
