@@ -204,12 +204,6 @@ mod tests {
     use futures::stream;
     use tokio_core::reactor::Core;
 
-    impl<T> Length for Vec<T> {
-        fn len(&self) -> usize {
-            self.len()
-        }
-    }
-
 
     impl Length for u32 {
         fn len(&self) -> usize {
@@ -241,6 +235,43 @@ mod tests {
         }
 
         let expected_vec = (0 .. 100).collect::<Vec<u32>>();
+        assert_eq!(res_vec, expected_vec);
+    }
+
+    impl Length for Vec<u8> {
+        fn len(&self) -> usize {
+            self.len()
+        }
+    }
+
+
+    #[test]
+    fn test_rate_limit_variable_len() {
+        let mut core = Core::new().unwrap();
+        let handle = core.handle();
+
+        let (rl_sender, rl_receiver) = rate_limit_channel(5, &handle);
+        let source_stream = stream::iter_ok((0 .. 400).map(|i| vec![i as u8; (i % 17) as usize]));
+
+        handle.spawn(
+            source_stream.forward(rl_sender)
+            .map_err(|_e: mpsc::SendError<Vec<u8>>| ())
+            .and_then(|_| Ok(()))
+        );
+
+        let mut res_vec = Vec::new();
+        {
+            let recv_future = rl_receiver.for_each(|item| {
+                res_vec.push(item);
+                Ok(())
+            }); 
+            core.run(recv_future).unwrap();
+        }
+
+        let expected_vec = (0 .. 400)
+            .map(|i| vec![i as u8; (i % 17) as usize])
+            .collect::<Vec<Vec<u8>>>();
+
         assert_eq!(res_vec, expected_vec);
     }
 }
