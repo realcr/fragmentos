@@ -176,10 +176,9 @@ fn main() {
         max_frag_msg_len: MAX_FRAG_MSG_LEN, //max_message(max_dgram_len).unwrap(),
     };
 
+
     let queue_len = (max_message(max_dgram_len).unwrap() / max_dgram_len) * RATE_LIMIT_BUFF_MULT;
     let (rl_sender, rl_receiver) = rate_limit_channel(queue_len, &handle);
-
-    // let rl_sink = rate_limit_sink(sink, rate_limit_buffer, &handle);
     handle.spawn(
         sink.sink_map_err(|_| ())
             .send_all(rl_receiver)
