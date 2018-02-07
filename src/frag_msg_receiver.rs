@@ -2,71 +2,71 @@ use std::time::Instant;
 use std::marker::PhantomData;
 
 use futures::{Stream, Poll, Async};
+use futures::sync::mpsc;
 
 use ::state_machine::{FragStateMachine};
 
-pub struct FragMsgReceiver<A,R,Q,E>
+pub struct FragMsgReceiver<A,R,E>
 where 
     R: Stream<Item=(Vec<u8>, A), Error=E>,
-    Q: FnMut() -> Instant,
 {
     frag_state_machine: FragStateMachine,
     recv_stream: R,
-    get_cur_instant: Q,
+    recv_time_tick: mpsc::Receiver<()>,
     phantom_a: PhantomData<A>,
 }
 
 
-impl<A,R,Q,E> FragMsgReceiver<A,R,Q,E>
+impl<A,R,E> FragMsgReceiver<A,R,E>
 where
     R: Stream<Item=(Vec<u8>, A), Error=E>,
-    Q: FnMut() -> Instant,
 {
-    pub fn new(recv_stream: R, get_cur_instant: Q) -> Self {
+    pub fn new(recv_stream: R, recv_time_tick: mpsc::Receiver<()>) -> Self {
         FragMsgReceiver {
             frag_state_machine: FragStateMachine::new(),
             recv_stream,
-            get_cur_instant,
+            recv_time_tick,
             phantom_a: PhantomData,
         }
     }
 }
 
+pub enum FragMsgReceiverError<E> {
+    RecvTimeTickError,
+    RecvStreamError(E),
+}
 
-impl<A,R,Q,E> Stream for FragMsgReceiver<A,R,Q,E>
+
+impl<A,R,E> Stream for FragMsgReceiver<A,R,E>
 where 
     R: Stream<Item=(Vec<u8>, A), Error=E>,
-    Q: FnMut() -> Instant,
 {
     type Item = (Vec<u8>, A);
-    type Error = E;
+    type Error = FragMsgReceiverError<E>;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
 
         let total_msg: Vec<u8>;
         let last_address: A;
 
+        // Check if a time tick is ready:
+        match self.recv_time_tick.poll() {
+            Ok(Async::Ready(Some(()))) => self.frag_state_machine.time_tick(),
+            Ok(Async::Ready(None)) => return Ok(Async::Ready(None)),
+            Ok(Async::NotReady) => {},
+            Err(()) => return Err(FragMsgReceiverError::RecvTimeTickError),
+        };
+
         loop {
             let (dgram, address) = match self.recv_stream.poll() {
                 Ok(Async::Ready(Some((dgram, address)))) => (dgram, address),
                 Ok(Async::Ready(None)) => return Ok(Async::Ready(None)),
                 Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => return Err(e),
+                Err(e) => return Err(FragMsgReceiverError::RecvStreamError(e)),
             };
 
-            // Obtain current time:
-            let cur_instant = (self.get_cur_instant)();
-
-            // Possibly clean up some old message fragments:
-            // TODO: This could be inefficient. In the future we might need to make time_tick
-            // work faster or add some kind of conditional mechanism to run this code only once
-            // in a while, instead of running it for every incoming message.
-            self.frag_state_machine.time_tick(cur_instant);
-
             // Add fragment to state machine, possibly reconstructing a full message:
-           
-            let msg_res = self.frag_state_machine.received_frag_message(
-                    &dgram, cur_instant);
+            let msg_res = self.frag_state_machine.received_frag_message(&dgram);
 
             match msg_res {
                 Some(msg) => {
@@ -91,10 +91,34 @@ mod tests {
     use super::*;
     use std::time::{Instant, Duration};
     use std::collections::VecDeque;
-    use futures::{stream, Future};
+    use futures::{Sink, stream, Future};
     use tokio_core::reactor::Core;
 
     use ::messages::{split_message};
+    use futures::prelude::*;
+
+
+    /*
+    #[async]
+    fn stream_split<S,T,E>(stream: S, sinks: Vec<mpsc::Sender<T>>) -> Result<(),()> 
+    where
+        S: Stream<Item=T, Error=E>,
+        T: Clone,
+    {
+        let mut sinks = sinks;
+
+        #[async]
+        for item in stream {
+            sinks = sinks.into_iter().filter_map(|sink| {
+                match await!(sink.send(item.clone())) {
+                    Ok(sink) => Some(sink),
+                    Err(_) => None,
+                }
+            });
+        }
+    }
+    */
+
 
     #[test]
     fn test_frag_msg_receiver_basic() {
@@ -118,17 +142,19 @@ mod tests {
 
         for frag in frags.into_iter().take(b) {
             items.push_back((frag, ADDRESS));
-            instants.push_back(cur_instant);
-
-            // Add a small time duration between the receipt 
-            // of two subsequent fragments:
-            cur_instant += Duration::new(0,20);
         }
 
-        let get_cur_instant = || instants.pop_front().unwrap();
-        let recv_stream = stream::iter_ok(items);
+        let (send_time_tick, recv_time_tick) = mpsc::channel(0);
 
-        let fmr = FragMsgReceiver::new(recv_stream, get_cur_instant);
+        
+        let recv_stream = stream::iter_ok(items)
+            .map(move |item| {
+                send_time_tick.send(())
+                    .and_then(move |_| Ok((item, ADDRESS)))
+            });
+
+        let fmr = FragMsgReceiver::new(recv_stream, recv_time_tick);
+
         let fut_msg = fmr.into_future().map_err(|(e,_):((),_)| e);
 
         let mut core = Core::new().unwrap();
