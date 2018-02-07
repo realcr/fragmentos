@@ -1,3 +1,4 @@
+use std;
 use std::time::{Duration};
 use std::{io, cmp};
 use std::collections::VecDeque;
@@ -11,6 +12,20 @@ use tokio_core::reactor::{Timeout, Handle};
 
 const INITIAL_ITEMS_PER_MS: usize = 1;
 const MAX_ITEMS_PER_MS: usize = 0x1000;
+
+/// Something that has length.
+/// This could example, describe chunks of data, 
+/// where length() is the amount of bytes in the chunk.
+pub trait Length {
+    fn len(&self) -> usize;
+}
+
+
+impl Length for (Vec<u8>, std::net::SocketAddr) {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
 
 
 enum RateLimitError {
@@ -29,7 +44,7 @@ struct RateLimitFuture<T> {
     handle: Handle,
 }
 
-impl<T> RateLimitFuture<T> {
+impl<T: Length> RateLimitFuture<T> {
     fn new(inner_sender: mpsc::Sender<T>, 
            inner_receiver: mpsc::Receiver<T>,
            queue_len: usize,
@@ -79,7 +94,7 @@ impl<T> RateLimitFuture<T> {
     }
 }
 
-impl<T> Future for RateLimitFuture<T> {
+impl<T: Length> Future for RateLimitFuture<T> {
     type Item = ();
     type Error = RateLimitError;
 
@@ -158,7 +173,7 @@ impl<T> Future for RateLimitFuture<T> {
 }
 
 
-pub fn rate_limit_channel<T: 'static>(queue_len: usize, handle: &reactor::Handle) -> 
+pub fn rate_limit_channel<T: Length + 'static>(queue_len: usize, handle: &reactor::Handle) -> 
     (mpsc::Sender<T>, mpsc::Receiver<T>)  {
 
     let (rate_limit_sender, inner_receiver) = mpsc::channel(0);
@@ -181,6 +196,19 @@ mod tests {
     use super::*;
     use futures::stream;
     use tokio_core::reactor::Core;
+
+    impl<T> Length for Vec<T> {
+        fn len(&self) -> usize {
+            self.len()
+        }
+    }
+
+
+    impl Length for u32 {
+        fn len(&self) -> usize {
+            4
+        }
+    }
 
     #[test]
     fn test_rate_limit_basic() {
