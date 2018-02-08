@@ -162,7 +162,7 @@ mod tests {
             time_sink: send_time_tick, 
             data_sink: send_sink,
             time_turn: true,
-            items: VecDeque::new(),
+            items,
         };
 
 
