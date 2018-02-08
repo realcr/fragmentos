@@ -3,7 +3,7 @@ extern crate futures;
 extern crate tokio_core;
 extern crate fragmentos;
 
-use std::time::Instant;
+use std::time::Duration;
 
 use rand::{StdRng, Rng};
 use futures::{stream, Future, Stream, Sink};
@@ -11,7 +11,7 @@ use futures::sync::mpsc;
 use fragmentos::FragMsgReceiver;
 use fragmentos::FragMsgSender;
 
-use self::tokio_core::reactor::Core;
+use self::tokio_core::reactor::{Core, Interval};
 
 const NUM_MESSAGES: usize = 0x400;
 const MESSAGE_SIZE: usize = 1 << 12;
@@ -20,7 +20,6 @@ const MESSAGE_SIZE: usize = 1 << 12;
 const MAX_DGRAM_LEN: usize = 500;
 
 fn main() {
-    let get_cur_instant = || Instant::now();
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
@@ -32,7 +31,12 @@ fn main() {
     let (sink, stream) = mpsc::channel::<(Vec<u8>, u32)>(0);
 
     let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, sender_rng);
-    let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
+
+    let time_receiver = Interval::new(Duration::new(1,0), &handle)
+        .unwrap()
+        .map_err(|_| ());
+
+    let frag_receiver = FragMsgReceiver::new(stream, time_receiver);
 
     let seed: &[_] = &[1,2,3,4,5];
     let mut msg_rng: StdRng = rand::SeedableRng::from_seed(seed);
