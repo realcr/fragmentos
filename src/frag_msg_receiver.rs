@@ -182,9 +182,9 @@ mod tests {
                         data_sink
                         .send(item)
                         .map_err(|_| ())
-                        .and_then(move |data_sink|
-                                  Ok(Loop::Continue(SplitterState {
-                                      time_sink, data_sink, time_turn: !time_turn, items}))))
+                        .and_then(move |data_sink| 
+                            Ok(Loop::Continue(SplitterState {
+                                  time_sink, data_sink, time_turn: !time_turn, items}))))
                 } else {
                     Box::new(ok(Loop::Break(())))
                 }
