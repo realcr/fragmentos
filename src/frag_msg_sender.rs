@@ -119,7 +119,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Instant, Duration};
 
     use rand;
     use rand::{StdRng};
