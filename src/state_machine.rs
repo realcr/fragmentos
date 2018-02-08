@@ -1,5 +1,4 @@
-use std::time::{Instant};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
 use ::shares::{DataShare};
 use ::messages::{MESSAGE_ID_LEN, ECC_LEN,
@@ -40,7 +39,6 @@ impl FragStateMachine {
     /// Process a newly received Fragmentos message.
     /// Possibly return a reconstructed message.
     pub fn received_frag_message(&mut self, frag_message: &[u8]) -> Option<Vec<u8>> {
-
         // Use the error correcting code to try to correct the error if possible.
         match verify_frag_message(frag_message) {
             true => {},
