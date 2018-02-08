@@ -7,27 +7,31 @@ use futures::future::{loop_fn, Loop, ok};
 
 use ::state_machine::{FragStateMachine};
 
-pub struct FragMsgReceiver<A,R,E>
+pub struct FragMsgReceiver<A,R,E,K>
 where 
     R: Stream<Item=(Vec<u8>, A), Error=E>,
+    K: Stream<Item=(),Error=()>,
 {
     frag_state_machine: FragStateMachine,
     recv_stream: R,
-    recv_time_tick: mpsc::Receiver<()>,
+    recv_time_tick: K,
     phantom_a: PhantomData<A>,
+    phantom_k: PhantomData<K>,
 }
 
 
-impl<A,R,E> FragMsgReceiver<A,R,E>
+impl<A,R,E,K> FragMsgReceiver<A,R,E,K>
 where
     R: Stream<Item=(Vec<u8>, A), Error=E>,
+    K: Stream<Item=(),Error=()>,
 {
-    pub fn new(recv_stream: R, recv_time_tick: mpsc::Receiver<()>) -> Self {
+    pub fn new(recv_stream: R, recv_time_tick: K) -> Self {
         FragMsgReceiver {
             frag_state_machine: FragStateMachine::new(),
             recv_stream,
             recv_time_tick,
             phantom_a: PhantomData,
+            phantom_k: PhantomData,
         }
     }
 }
@@ -38,9 +42,10 @@ pub enum FragMsgReceiverError<E> {
 }
 
 
-impl<A,R,E> Stream for FragMsgReceiver<A,R,E>
+impl<A,R,E,K> Stream for FragMsgReceiver<A,R,E,K>
 where 
     R: Stream<Item=(Vec<u8>, A), Error=E>,
+    K: Stream<Item=(),Error=()>,
 {
     type Item = (Vec<u8>, A);
     type Error = FragMsgReceiverError<E>;
