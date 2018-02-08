@@ -86,10 +86,10 @@ impl<T: Length> RateLimitFuture<T> {
             (self.tokens_per_ms * 2) + 1
         } else {
             // Leave unchanged
-            if self.tokens_per_ms > 1 {
+            if self.tokens_per_ms > 0 {
                 self.tokens_per_ms - 1
             } else {
-                1
+                0
             }
         };
 
