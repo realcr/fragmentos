@@ -54,8 +54,11 @@ fn main() {
         .map_err(|_| ());
     let frag_receiver = FragMsgReceiver::new(stream, time_receiver);
 
+    let mut incoming_counter: usize = 0;
+
     let frag_receiver = frag_receiver.map(|x| {
-        println!("Received a Fragmentos message!");
+        println!("Received a Fragmentos message! counter = {}", incoming_counter);
+        incoming_counter += 1;
         x
     });
 
