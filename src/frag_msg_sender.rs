@@ -197,7 +197,7 @@ mod tests {
         for i in 0 .. b - 1 {
             let (ref dgram, _address) = sent_dgrams[i];
             assert_eq!(fsm.received_frag_message(dgram), None);
-            for i in 0 .. 5 {
+            for _ in 0 .. 2 {
                 fsm.time_tick();
             }
         }
