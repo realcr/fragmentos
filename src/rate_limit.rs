@@ -41,6 +41,7 @@ struct RateLimitFuture<T> {
     send_tokens_left: usize,
     queue_len: usize,
     tokens_per_ms: usize,
+    token_shortage: bool,
     handle: Handle,
 }
 
@@ -74,11 +75,27 @@ impl<T: Length> RateLimitFuture<T> {
             send_tokens_left: INITIAL_TOKENS_PER_MS,
             queue_len,
             tokens_per_ms: INITIAL_TOKENS_PER_MS,
+            token_shortage: false,
             handle: handle.clone(),
         }
     }
 
     fn inspect_and_correct(&mut self) {
+        let new_tokens_per_ms = if self.token_shortage {
+            // We are using all the tokens, we need to increase the speed:
+            (self.tokens_per_ms * 2) + 1
+        } else {
+            // Leave unchanged
+            if self.tokens_per_ms > 1 {
+                self.tokens_per_ms - 1
+            } else {
+                1
+            }
+        };
+
+        self.token_shortage = false;
+
+        /*
         // println!("self.tokens_per_ms = {}", self.tokens_per_ms);
         let pending_items_len = self.pending_items.len();
         let new_tokens_per_ms = if pending_items_len > 3 * self.queue_len / 4 {
@@ -93,6 +110,7 @@ impl<T: Length> RateLimitFuture<T> {
             // Nothing to do
             return;
         };
+        */
         self.tokens_per_ms = cmp::min(new_tokens_per_ms, MAX_TOKENS_PER_MS);
     }
 
@@ -164,17 +182,18 @@ impl<T: Length> Future for RateLimitFuture<T> {
             },
         };
 
-        println!("Entering loop...");
-        println!("send_tokens_left = {}", self.send_tokens_left);
-        println!("tokens_per_ms = {}", self.tokens_per_ms);
-        println!("self.pending_items.len() = {}", self.pending_items.len());
+        // println!("Entering loop...");
+        // println!("send_tokens_left = {}", self.send_tokens_left);
+        // println!("tokens_per_ms = {}", self.tokens_per_ms);
+        // println!("self.pending_items.len() = {}", self.pending_items.len());
         loop {
             // Send as many messages as possible:
-            let res = self.try_send();
-            println!("res = {:?}", res);
             match self.try_send() {
                 TrySendResult::NoMoreItems => {},
-                TrySendResult::NoMoreTokens | 
+                TrySendResult::NoMoreTokens => {
+                    self.token_shortage = true;
+                    break;
+                },
                 TrySendResult::SenderNotReady => break,
                 TrySendResult::SenderError => return Ok(Async::Ready(())),
             }
@@ -187,7 +206,9 @@ impl<T: Length> Future for RateLimitFuture<T> {
                 TryRecvResult::ReceiverClosed => break,
             }
         }
-        println!("Exiting loop...");
+        // println!("Exiting loop...");
+
+
 
         if self.pending_items.len() == 0 && self.inner_receiver_opt.is_none() {
             // If there are no more pending items to be sent, and the receiver is closed,
@@ -211,7 +232,6 @@ impl<T: Length> Future for RateLimitFuture<T> {
                 }
             );
         }
-
         Ok(Async::NotReady)
     }
 }
