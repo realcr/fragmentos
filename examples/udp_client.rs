@@ -8,7 +8,7 @@ extern crate fragmentos;
 use std::net::SocketAddr;
 use std::io;
 use std::{env};
-use std::time::{Instant, Duration};
+use std::time::{Duration};
 use std::collections::HashSet;
 
 use rand::Rng;
@@ -20,7 +20,7 @@ use futures::{future, IntoFuture};
 
 use tokio_core::net::{UdpSocket};
 use tokio_core::reactor;
-use tokio_core::reactor::Core;
+use tokio_core::reactor::{Core, Interval};
 
 use fragmentos::{FragMsgReceiver, FragMsgSender, max_message, rate_limit_channel};
 use fragmentos::utils::DgramCodec;
@@ -37,10 +37,6 @@ const UDP_MAX_DGRAM: usize = 512;
 // Maximum message size we are going to send using Fragmentos
 const MAX_FRAG_MSG_LEN: usize = 20000;
 
-/// Get current time
-fn get_cur_instant() -> Instant {
-    Instant::now()
-}
 
 struct Collector<S> {
     received_ids: HashSet<u64>,
@@ -195,8 +191,11 @@ fn main() {
                                          rand::thread_rng());
     */
 
+    let time_receiver = Interval::new(Duration::new(1,0), &handle)
+        .unwrap()
+        .map_err(|_| ());
 
-    let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
+    let frag_receiver = FragMsgReceiver::new(stream, time_receiver);
 
     // Add some delay to the message stream:
     let chandle = handle.clone();
