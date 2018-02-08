@@ -36,6 +36,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub enum FragMsgReceiverError<E> {
     RecvTimeTickError,
     RecvStreamError(E),
