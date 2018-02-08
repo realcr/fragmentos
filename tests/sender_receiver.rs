@@ -3,7 +3,7 @@ extern crate futures;
 extern crate tokio_core;
 extern crate fragmentos;
 
-use std::time::Instant;
+use std::time::{Duration};
 
 use rand::StdRng;
 use futures::{stream, Future, Stream, Sink};
@@ -12,7 +12,7 @@ use futures::sync::mpsc;
 use fragmentos::FragMsgReceiver;
 use fragmentos::FragMsgSender;
 
-use self::tokio_core::reactor::Core;
+use tokio_core::reactor::{Core, Interval};
 
 // A maximum size of underlying datagram:
 const MAX_DGRAM_LEN: usize = 22;
@@ -23,7 +23,6 @@ fn basic_test_sender_receiver() {
     let seed: &[_] = &[1,2,3,4,5];
     let rng: StdRng = rand::SeedableRng::from_seed(seed);
 
-    let get_cur_instant = || Instant::now();
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
@@ -31,8 +30,12 @@ fn basic_test_sender_receiver() {
     // let (sink, stream) = sink_stream_pair::<(Vec<u8>, u32)>(1);
     let (sink, stream) = mpsc::channel::<(Vec<u8>, u32)>(0);
 
+    let time_receiver = Interval::new(Duration::new(1,0), &handle)
+        .unwrap()
+        .map_err(|_| ());
+
     let frag_sender = FragMsgSender::new(sink, MAX_DGRAM_LEN, rng);
-    let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
+    let frag_receiver = FragMsgReceiver::new(stream, time_receiver);
 
     let messages: Vec<(Vec<u8>, u32)> = vec![
         (b"How are you today?".to_vec(), 0x12345678),
