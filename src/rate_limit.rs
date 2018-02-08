@@ -44,11 +44,20 @@ struct RateLimitFuture<T> {
     handle: Handle,
 }
 
+#[derive(Debug)]
 enum TrySendResult {
     NoMoreTokens,
     NoMoreItems,
     SenderNotReady,
     SenderError,
+}
+
+#[derive(Debug)]
+enum TryRecvResult {
+    NoReceiver,
+    ReceiverNotReady,
+    ReceiverClosed,
+    QueueFull,
 }
 
 impl<T: Length> RateLimitFuture<T> {
@@ -87,17 +96,24 @@ impl<T: Length> RateLimitFuture<T> {
         self.tokens_per_ms = cmp::min(new_tokens_per_ms, MAX_TOKENS_PER_MS);
     }
 
-    fn try_recv(&mut self, mut inner_receiver: mpsc::Receiver<T>) -> Option<mpsc::Receiver<T>> {
-        while self.pending_items.len() < self.queue_len {
-            match inner_receiver.poll() {
-                Ok(Async::NotReady) => { 
-                    return Some(inner_receiver)
-                },
-                Ok(Async::Ready(Some(item))) => self.pending_items.push_back(item),
-                Ok(Async::Ready(None)) | Err(()) => return None,
-            };
+    fn try_recv(&mut self) -> TryRecvResult {
+        match self.inner_receiver_opt.take() {
+            Some(mut inner_receiver) => {
+                while self.pending_items.len() < self.queue_len {
+                    match inner_receiver.poll() {
+                        Ok(Async::NotReady) => {
+                            self.inner_receiver_opt = Some(inner_receiver);
+                            return TryRecvResult::ReceiverNotReady;
+                        },
+                        Ok(Async::Ready(Some(item))) => self.pending_items.push_back(item),
+                        Ok(Async::Ready(None)) | Err(()) => return TryRecvResult::ReceiverClosed,
+                    }
+                }
+                self.inner_receiver_opt = Some(inner_receiver);
+                TryRecvResult::QueueFull
+            },
+            None => TryRecvResult::NoReceiver,
         }
-        Some(inner_receiver)
     }
 
     fn try_send(&mut self) -> TrySendResult {
@@ -148,32 +164,36 @@ impl<T: Length> Future for RateLimitFuture<T> {
             },
         };
 
-        let mut should_try_send: bool = true;
-
-        // Send as many messages as possible:
-        if should_try_send {
+        println!("Entering loop...");
+        println!("send_tokens_left = {}", self.send_tokens_left);
+        println!("tokens_per_ms = {}", self.tokens_per_ms);
+        println!("self.pending_items.len() = {}", self.pending_items.len());
+        loop {
+            // Send as many messages as possible:
+            let res = self.try_send();
+            println!("res = {:?}", res);
             match self.try_send() {
                 TrySendResult::NoMoreItems => {},
                 TrySendResult::NoMoreTokens | 
-                TrySendResult::SenderNotReady => should_try_send = false,
+                TrySendResult::SenderNotReady => break,
                 TrySendResult::SenderError => return Ok(Async::Ready(())),
             }
-        }
 
-        // Try to receive as many messages as possible:
-        self.inner_receiver_opt = match self.inner_receiver_opt.take() {
-            None => None,
-            Some(inner_receiver) => {
-                self.try_recv(inner_receiver)
-            },
-        };
+            // Try to receive as many messages as possible:
+            match self.try_recv() {
+                TryRecvResult::QueueFull => {},
+                TryRecvResult::NoReceiver |
+                TryRecvResult::ReceiverNotReady |
+                TryRecvResult::ReceiverClosed => break,
+            }
+        }
+        println!("Exiting loop...");
 
         if self.pending_items.len() == 0 && self.inner_receiver_opt.is_none() {
             // If there are no more pending items to be sent, and the receiver is closed,
             // we have nothing more to do here.
             return Ok(Async::Ready(()));
         }
-
 
 
         // If there are any pending items, set the Timer to poll us again later.
