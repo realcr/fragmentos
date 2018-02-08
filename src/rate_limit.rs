@@ -44,6 +44,13 @@ struct RateLimitFuture<T> {
     handle: Handle,
 }
 
+enum TrySendResult {
+    NoMoreTokens,
+    NoMoreItems,
+    SenderNotReady,
+    SenderError,
+}
+
 impl<T: Length> RateLimitFuture<T> {
     fn new(inner_sender: mpsc::Sender<T>, 
            inner_receiver: mpsc::Receiver<T>,
@@ -92,6 +99,30 @@ impl<T: Length> RateLimitFuture<T> {
         }
         Some(inner_receiver)
     }
+
+    fn try_send(&mut self) -> TrySendResult {
+        while let Some(item) = self.pending_items.pop_front() {
+            // Check if we have enough send tokens to send this element:
+            let item_len = item.len();
+            if item_len > self.send_tokens_left {
+                // Put the item back into the queue:
+                self.pending_items.push_front(item);
+                return TrySendResult::NoMoreTokens;
+            }
+            match self.inner_sender.start_send(item) {
+                Err(_send_error) => return TrySendResult::SenderError,
+                Ok(AsyncSink::NotReady(item)) => {
+                    // Put the item back into the queue:
+                    self.pending_items.push_front(item);
+                    return TrySendResult::SenderNotReady;
+                },
+                Ok(AsyncSink::Ready) => {
+                    self.send_tokens_left -= item_len;
+                },
+            }
+        }
+        return TrySendResult::NoMoreItems;
+    }
 }
 
 impl<T: Length> Future for RateLimitFuture<T> {
@@ -100,6 +131,7 @@ impl<T: Length> Future for RateLimitFuture<T> {
 
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        // TODO: We probably need to add a loop {} to this poll() function.
         // If timer is ready, we add tokens to the token bucket
         // by increasing self.send_tokens_left.
         match self.opt_next_timeout.take() {
@@ -116,30 +148,15 @@ impl<T: Length> Future for RateLimitFuture<T> {
             },
         };
 
+        let mut should_try_send: bool = true;
 
         // Send as many messages as possible:
-        while self.send_tokens_left > 0 {
-            if let Some(item) = self.pending_items.pop_front() {
-                // Check if we have enough send tokens to send this element:
-                let item_len = item.len();
-                if item_len > self.send_tokens_left {
-                    // Put the item back into the queue:
-                    self.pending_items.push_front(item);
-                    break;
-                }
-                match self.inner_sender.start_send(item) {
-                    Err(_send_error) => return Ok(Async::Ready(())),
-                    Ok(AsyncSink::NotReady(item)) => {
-                        // Put the item back into the queue:
-                        self.pending_items.push_front(item);
-                        break;
-                    },
-                    Ok(AsyncSink::Ready) => {
-                        self.send_tokens_left -= item_len;
-                    },
-                }
-            } else {
-                break;
+        if should_try_send {
+            match self.try_send() {
+                TrySendResult::NoMoreItems => {},
+                TrySendResult::NoMoreTokens | 
+                TrySendResult::SenderNotReady => should_try_send = false,
+                TrySendResult::SenderError => return Ok(Async::Ready(())),
             }
         }
 
