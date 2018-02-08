@@ -163,7 +163,6 @@ impl FragStateMachine {
 mod tests {
     use super::*;
     use ::messages::split_message;
-    use std::time::Duration;
 
     #[test]
     fn test_time_tick_basic() {
