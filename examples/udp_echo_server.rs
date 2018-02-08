@@ -6,12 +6,12 @@ extern crate fragmentos;
 
 use std::net::SocketAddr;
 use std::{env};
-use std::time::Instant;
+use std::time::Duration;
 
 use futures::{Future, Stream, Sink};
 
 use tokio_core::net::{UdpSocket};
-use tokio_core::reactor::Core;
+use tokio_core::reactor::{Core, Interval};
 
 use fragmentos::{FragMsgReceiver, FragMsgSender, 
     max_message, rate_limit_channel};
@@ -22,11 +22,6 @@ const UDP_MAX_DGRAM: usize = 512;
 
 // Multiplier for the calculation of rate limit buffer:
 const RATE_LIMIT_BUFF_MULT: usize = 16;
-
-/// Get current time
-fn get_cur_instant() -> Instant {
-    Instant::now()
-}
 
 
 fn main() {
@@ -54,7 +49,10 @@ fn main() {
 
     let frag_sender = FragMsgSender::new(rl_sender, max_dgram_len, rand::thread_rng());
     // let frag_sender = FragMsgSender::new(sink, max_dgram_len, rand::thread_rng());
-    let frag_receiver = FragMsgReceiver::new(stream, get_cur_instant);
+    let time_receiver = Interval::new(Duration::new(1,0), &handle)
+        .unwrap()
+        .map_err(|_| ());
+    let frag_receiver = FragMsgReceiver::new(stream, time_receiver);
 
     let frag_receiver = frag_receiver.map(|x| {
         println!("Received a Fragmentos message!");
