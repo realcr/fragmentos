@@ -94,23 +94,6 @@ impl<T: Length> RateLimitFuture<T> {
         };
 
         self.token_shortage = false;
-
-        /*
-        // println!("self.tokens_per_ms = {}", self.tokens_per_ms);
-        let pending_items_len = self.pending_items.len();
-        let new_tokens_per_ms = if pending_items_len > 3 * self.queue_len / 4 {
-            (self.tokens_per_ms * 2) + 1
-        } else if pending_items_len < self.queue_len / 4_{
-            if self.tokens_per_ms <= 1 {
-                1
-            } else {
-                self.tokens_per_ms - 1
-            }
-        } else {
-            // Nothing to do
-            return;
-        };
-        */
         self.tokens_per_ms = cmp::min(new_tokens_per_ms, MAX_TOKENS_PER_MS);
     }
 
