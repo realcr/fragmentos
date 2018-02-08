@@ -203,7 +203,7 @@ fn main() {
             .and_then(move |item| {
                       // println!("Sending an item...");
                       let cchandle = chandle.clone();
-                      reactor::Timeout::new(Duration::new(0,MILLISECOND * 10), &cchandle)
+                      reactor::Timeout::new(Duration::new(0,MILLISECOND * 1), &cchandle)
                           .into_future()
                           .and_then(move |timeout| timeout.and_then(move |_| Ok(item)))
             });
