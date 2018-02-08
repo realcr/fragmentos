@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 
 use futures::{Stream, Poll, Async};
 use futures::sync::mpsc;
+use futures::future::{loop_fn, Loop, ok};
 
 use ::state_machine::{FragStateMachine};
 
@@ -145,19 +146,61 @@ mod tests {
         }
 
         let (send_time_tick, recv_time_tick) = mpsc::channel(0);
+        let (send_sink, recv_stream) = mpsc::channel(0);
 
-        
-        let recv_stream = stream::iter_ok(items)
-            .map(move |item| {
-                send_time_tick.send(())
-                    .and_then(move |_| Ok((item, ADDRESS)))
-            });
+        struct SplitterState<T> {
+            time_sink: mpsc::Sender<()>,
+            data_sink: mpsc::Sender<T>,
+            time_turn: bool,
+            items: VecDeque<T>,
+        };
 
-        let fmr = FragMsgReceiver::new(recv_stream, recv_time_tick);
+        let splitter = SplitterState { 
+            time_sink: send_time_tick, 
+            data_sink: send_sink,
+            time_turn: true,
+            items: VecDeque::new(),
+        };
 
-        let fut_msg = fmr.into_future().map_err(|(e,_):((),_)| e);
+
+        let splitter = loop_fn(splitter, 
+                               |SplitterState {time_sink, data_sink, time_turn, mut items} 
+                               : SplitterState<(Vec<u8>, u32)>| -> Box<Future<Item=_, Error=()>> {
+            if time_turn {
+                Box::new(time_sink
+                    .send(())
+                    .map_err(|_| ())
+                    .and_then(move |time_sink| 
+                              Ok(Loop::Continue(SplitterState {
+                                  time_sink, data_sink, time_turn: !time_turn, items}))))
+            } else {
+                if let Some(item) = items.pop_front() {
+                    Box::new(
+                        data_sink
+                        .send(item)
+                        .map_err(|_| ())
+                        .and_then(move |data_sink|
+                                  Ok(Loop::Continue(SplitterState {
+                                      time_sink, data_sink, time_turn: !time_turn, items}))))
+                } else {
+                    Box::new(ok(Loop::Break(())))
+                }
+            }
+        });
 
         let mut core = Core::new().unwrap();
+        let handle = core.handle();
+
+        handle.spawn(splitter);
+
+        let fmr = FragMsgReceiver::new(recv_stream, recv_time_tick);
+        let fut_msg = fmr
+            .into_future()
+            .map_err(|_| ());
+
+
+        // let fut_msg = fmr.into_future().map_err(|(e,_):((),_)| e);
+
         let (opt_elem, _fmr) = core.run(fut_msg).unwrap();
 
         let (message, address) = opt_elem.unwrap();
