@@ -52,7 +52,6 @@ where
     type Error = FragMsgReceiverError<E>;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-
         let total_msg: Vec<u8>;
         let last_address: A;
 
@@ -136,7 +135,6 @@ mod tests {
 
         // Lists of messages, addresses and time instants:
         let mut items = VecDeque::new();
-        let mut instants: VecDeque<Instant> = VecDeque::new();
 
         let orig_message = b"This is some message to be split";
         let frags = split_message(orig_message, 
@@ -145,7 +143,6 @@ mod tests {
         assert!(frags.len() % 2 == 1);
 
         let b = (frags.len() + 1) / 2;
-        let mut cur_instant = Instant::now();
 
         for frag in frags.into_iter().take(b) {
             items.push_back((frag, ADDRESS));
