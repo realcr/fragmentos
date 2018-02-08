@@ -1,9 +1,5 @@
-use std::time::Instant;
 use std::marker::PhantomData;
-
 use futures::{Stream, Poll, Async};
-use futures::sync::mpsc;
-use futures::future::{loop_fn, Loop, ok};
 
 use ::state_machine::{FragStateMachine};
 
@@ -95,13 +91,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Instant, Duration};
     use std::collections::VecDeque;
-    use futures::{Sink, stream, Future};
     use tokio_core::reactor::Core;
+    use futures::{Sink, Future};
+    use futures::future::{loop_fn, Loop, ok};
+    use futures::sync::mpsc;
 
     use ::messages::{split_message};
-    use futures::prelude::*;
 
 
     /*
