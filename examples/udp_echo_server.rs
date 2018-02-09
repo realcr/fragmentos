@@ -13,8 +13,8 @@ use futures::{Future, Stream, Sink};
 use tokio_core::net::{UdpSocket};
 use tokio_core::reactor::{Core, Interval};
 
-use fragmentos::{FragMsgReceiver, FragMsgSender, 
-    max_message, rate_limit_channel};
+use fragmentos::{FragMsgReceiver, FragMsgSender, max_message };
+use fragmentos::rate_limit::rate_limit_channel;
 use fragmentos::utils::DgramCodec;
 
 // Maximum size of UDP datagram we are willing to send.

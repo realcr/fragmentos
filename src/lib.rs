@@ -17,7 +17,7 @@ extern crate test;
 mod shares;
 mod messages;
 mod state_machine;
-mod rate_limit;
+pub mod rate_limit;
 pub mod utils;
 mod frag_msg_receiver;
 mod frag_msg_sender;
@@ -25,7 +25,6 @@ mod frag_msg_sender;
 
 pub use ::frag_msg_receiver::FragMsgReceiver;
 pub use ::frag_msg_sender::FragMsgSender;
-pub use ::rate_limit::rate_limit_channel;
 pub use ::messages::{max_message};
 
 // For profiling:
