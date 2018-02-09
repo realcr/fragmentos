@@ -39,6 +39,7 @@ struct RateLimitFuture<T> {
     pending_items: VecDeque<T>,
     opt_next_timeout: Option<Timeout>,
     send_tokens_left: usize,
+    remainder_tokens: usize,
     queue_len: usize,
     tokens_per_ms: usize,
     token_shortage: bool,
@@ -73,6 +74,7 @@ impl<T: Length> RateLimitFuture<T> {
             pending_items: VecDeque::new(),
             opt_next_timeout: None,
             send_tokens_left: INITIAL_TOKENS_PER_MS,
+            remainder_tokens: 0,
             queue_len,
             tokens_per_ms: INITIAL_TOKENS_PER_MS,
             token_shortage: false,
@@ -121,20 +123,26 @@ impl<T: Length> RateLimitFuture<T> {
         while let Some(item) = self.pending_items.pop_front() {
             // Check if we have enough send tokens to send this element:
             let item_len = item.len();
-            if item_len > self.send_tokens_left {
+            if item_len > self.send_tokens_left + self.remainder_tokens {
                 // Put the item back into the queue:
                 self.pending_items.push_front(item);
+                self.remainder_tokens += self.send_tokens_left;
+                self.send_tokens_left = 0;
                 return TrySendResult::NoMoreTokens;
             }
+            let send_tokens_in_use = item_len - self.remainder_tokens;
             match self.inner_sender.start_send(item) {
                 Err(_send_error) => return TrySendResult::SenderError,
                 Ok(AsyncSink::NotReady(item)) => {
                     // Put the item back into the queue:
                     self.pending_items.push_front(item);
+                    self.remainder_tokens += send_tokens_in_use;
+                    self.send_tokens_left -= send_tokens_in_use;
                     return TrySendResult::SenderNotReady;
                 },
                 Ok(AsyncSink::Ready) => {
-                    self.send_tokens_left -= item_len;
+                    self.remainder_tokens = 0;
+                    self.send_tokens_left -= send_tokens_in_use;
                 },
             }
         }
