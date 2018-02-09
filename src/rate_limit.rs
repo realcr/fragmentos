@@ -10,7 +10,6 @@ use tokio_core::reactor;
 use tokio_core::reactor::{Timeout, Handle};
 
 
-const INITIAL_TOKENS_PER_MS: usize = 0x200;
 const MAX_TOKENS_PER_MS: usize = 1 << 32;
 
 /// Something that has length.
@@ -42,6 +41,7 @@ struct RateLimitFuture<T> {
     remainder_tokens: usize,
     queue_len: usize,
     tokens_per_ms: usize,
+    min_tokens_per_ms: usize,
     token_shortage: bool,
     handle: Handle,
 }
@@ -66,6 +66,7 @@ impl<T: Length> RateLimitFuture<T> {
     fn new(inner_sender: mpsc::Sender<T>, 
            inner_receiver: mpsc::Receiver<T>,
            queue_len: usize,
+           min_tokens_per_ms: usize,
            handle: &Handle) -> Self {
 
         RateLimitFuture {
@@ -73,10 +74,11 @@ impl<T: Length> RateLimitFuture<T> {
             inner_receiver_opt: Some(inner_receiver), 
             pending_items: VecDeque::new(),
             opt_next_timeout: None,
-            send_tokens_left: INITIAL_TOKENS_PER_MS,
+            send_tokens_left: min_tokens_per_ms,
             remainder_tokens: 0,
             queue_len,
-            tokens_per_ms: INITIAL_TOKENS_PER_MS,
+            tokens_per_ms: min_tokens_per_ms,
+            min_tokens_per_ms,
             token_shortage: false,
             handle: handle.clone(),
         }
@@ -88,10 +90,10 @@ impl<T: Length> RateLimitFuture<T> {
             (self.tokens_per_ms * 2) + 1
         } else {
             // Leave unchanged
-            if self.tokens_per_ms > 0 {
+            if self.tokens_per_ms > self.min_tokens_per_ms {
                 self.tokens_per_ms - 1
             } else {
-                0
+                self.min_tokens_per_ms
             }
         };
 
@@ -123,6 +125,7 @@ impl<T: Length> RateLimitFuture<T> {
         while let Some(item) = self.pending_items.pop_front() {
             // Check if we have enough send tokens to send this element:
             let item_len = item.len();
+            debug_assert!(self.remainder_tokens <= item_len);
             if item_len > self.send_tokens_left + self.remainder_tokens {
                 // Put the item back into the queue:
                 self.pending_items.push_front(item);
@@ -228,7 +231,7 @@ impl<T: Length> Future for RateLimitFuture<T> {
 }
 
 
-pub fn rate_limit_channel<T: Length + 'static>(queue_len: usize, handle: &reactor::Handle) -> 
+pub fn rate_limit_channel<T: Length + 'static>(queue_len: usize, min_tokens_per_ms: usize, handle: &reactor::Handle) -> 
     (mpsc::Sender<T>, mpsc::Receiver<T>)  {
 
     let (rate_limit_sender, inner_receiver) = mpsc::channel(0);
@@ -238,6 +241,7 @@ pub fn rate_limit_channel<T: Length + 'static>(queue_len: usize, handle: &reacto
         inner_sender,
         inner_receiver,
         queue_len,
+        min_tokens_per_ms,
         handle);
 
     // TODO: Add logging for possible errors here:
@@ -264,7 +268,7 @@ mod tests {
         let mut core = Core::new().unwrap();
         let handle = core.handle();
 
-        let (rl_sender, rl_receiver) = rate_limit_channel(5, &handle);
+        let (rl_sender, rl_receiver) = rate_limit_channel(5, 1, &handle);
         let source_stream = stream::iter_ok(0 .. 100u32);
 
         handle.spawn(
@@ -298,7 +302,7 @@ mod tests {
         let mut core = Core::new().unwrap();
         let handle = core.handle();
 
-        let (rl_sender, rl_receiver) = rate_limit_channel(5, &handle);
+        let (rl_sender, rl_receiver) = rate_limit_channel(5, 1, &handle);
         let source_stream = stream::iter_ok((0 .. 400).map(|i| vec![i as u8; (i % 17) as usize]));
 
         handle.spawn(
