@@ -121,6 +121,8 @@ impl<T: Length> RateLimitFuture<T> {
         }
     }
 
+    // TODO: This mechanism needs to be tested somehow.
+    // How to separate the logic here from the rest of the code?
     fn try_send(&mut self) -> TrySendResult {
         while let Some(item) = self.pending_items.pop_front() {
             // Check if we have enough send tokens to send this element:
